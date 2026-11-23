@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContentPadding
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,6 +31,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import org.mundocreativo.barronegro.data.SupabaseConfig
@@ -119,6 +125,8 @@ private fun ContenidoPrincipal(estado: EstadoApp) {
 @Composable
 private fun Cabecera(estado: EstadoApp) {
     val perfil = estado.perfil
+    var cambiarClave by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -137,8 +145,61 @@ private fun Cabecera(estado: EstadoApp) {
             )
         }
         TextButton(onClick = { estado.recargar() }) { Text("Actualizar") }
+        TextButton(onClick = { cambiarClave = true }) { Text("Clave") }
         TextButton(onClick = { estado.salir() }) { Text("Salir") }
     }
+
+    if (cambiarClave) {
+        DialogoCambiarContrasena(
+            alCerrar = { cambiarClave = false },
+            alGuardar = { nueva ->
+                estado.cambiarContrasena(nueva)
+                cambiarClave = false
+            },
+        )
+    }
+}
+
+/** Necesario tras abrir el enlace de recuperación: entra con sesión y aquí fija la clave nueva. */
+@Composable
+private fun DialogoCambiarContrasena(alCerrar: () -> Unit, alGuardar: (String) -> Unit) {
+    var nueva by remember { mutableStateOf("") }
+    var ver by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = alCerrar,
+        title = { Text("Cambiar contraseña") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Escribe la nueva contraseña (mínimo 8 caracteres).",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = nueva,
+                    onValueChange = { nueva = it },
+                    label = { Text("Nueva contraseña") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    visualTransformation = if (ver) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        TextButton(onClick = { ver = !ver }) {
+                            Text(if (ver) "Ocultar" else "Ver")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { alGuardar(nueva) }, enabled = nueva.length >= 8) {
+                Text("Guardar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = alCerrar) { Text("Cancelar") }
+        },
+    )
 }
 
 @Composable

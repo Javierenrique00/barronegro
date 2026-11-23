@@ -4,7 +4,15 @@ package org.mundocreativo.barronegro
 fun mensajeDeError(t: Throwable): String {
     val bruto = (t.message ?: t.toString()).trim()
 
+    // El orden importa: se devuelve la primera coincidencia, así que los códigos concretos
+    // van antes que las frases genéricas.
     val conocido = listOf(
+        "over_email_send_rate_limit" to "Se han enviado demasiados correos. Espera unos minutos.",
+        "email_address_not_authorized" to "El servidor de correo del proyecto no puede enviar a esa dirección. Configura un SMTP propio.",
+        "Email address not authorized" to "El servidor de correo del proyecto no puede enviar a esa dirección. Configura un SMTP propio.",
+        "Email rate limit exceeded" to "Se han enviado demasiados correos. Espera unos minutos.",
+        "Email link is invalid or has expired" to "El enlace del correo no es válido o ha caducado. Solicita uno nuevo.",
+        "New password should be different from the old password" to "La nueva contraseña debe ser distinta de la anterior.",
         "Invalid login credentials" to "Correo o contraseña incorrectos.",
         "Email not confirmed" to "Debes confirmar tu correo antes de entrar.",
         "User already registered" to "Ese correo ya está registrado.",

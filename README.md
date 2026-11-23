@@ -137,29 +137,79 @@ El registro crea usuarios con rol `usuario`. Para habilitar el panel de administ
 `supabase/promover_admin.sql`. Con al menos un administrador activo, los demás roles se cambian
 desde la función `cambiar_rol_usuario(...)`.
 
-## Antes de la primera prueba
+## Correo (confirmación de cuenta y recuperación)
 
-El registro usa el SMTP integrado de Supabase, que tiene un límite muy bajo de envíos por hora
-(la primera prueba devolvió `429 over_email_send_rate_limit`). Para poder probar hoy mismo, elige una:
+Supabase Auth envía sus propios correos: confirmación de registro, recuperación de contraseña,
+invitaciones y cambio de correo. El proyecto **no** puede usar el SMTP integrado porque solo
+entrega a las direcciones del equipo de la organización (el resto falla con
+`email_address_not_authorized`) y tiene un límite de unos pocos envíos por hora
+(`429 over_email_send_rate_limit`).
 
-- **Desarrollo**: *Authentication → Providers → Email* → desactivar **Confirm email**. El registro
-  devuelve sesión inmediatamente y la app entra sin esperar el correo.
-- **Producción**: conectar un SMTP propio (Resend, SES, Postmark…) y mantener **Confirm email**
-  activado.
+### Conectar un SMTP propio (Resend)
+
+1. Crea la cuenta en <https://resend.com>, añade tu dominio y publica los DNS que indica
+   (SPF y DKIM; añade también un `DMARC` con `v=DMARC1; p=none;`).
+2. *Authentication → Emails → SMTP Settings* → **Enable custom SMTP**:
+
+   | Campo | Valor |
+   | --- | --- |
+   | Host | `smtp.resend.com` |
+   | Port | `465` |
+   | Username | `resend` |
+   | Password | la API key de Resend (`re_...`) |
+   | Sender email | `no-reply@tudominio` |
+   | Sender name | `Taller Barro Negro` |
+
+   Brevo, SES, Postmark o SendGrid funcionan igual: solo cambian host, puerto y credenciales.
+3. *Authentication → Sign In / Providers → Email*: **Confirm email** activado.
+4. *Authentication → Rate Limits*: sube el límite de correos por hora (el valor por defecto es
+   bajo) y deja 60 s como frecuencia mínima por usuario.
+5. *Authentication → Emails → Templates*: las plantillas llegan en inglés; tradúcelas. Variables
+   disponibles: `{{ .ConfirmationURL }}`, `{{ .Token }}`, `{{ .SiteURL }}`, `{{ .Email }}`.
+6. Prueba con un correo que **no** pertenezca al equipo. Si no llega, *Authentication → Logs*
+   muestra el motivo real.
+
+> Con *Confirm email* activo y sin SMTP propio **ningún** registro de cliente funcionaría.
+
+### Enlaces de vuelta a la app
+
+- **Web**: el `Site URL` debe ser `https://javierenrique00.github.io/barronegro/`.
+- **Android**: `SupabaseCliente.kt` declara `scheme = "org.mundocreativo.barronegro"` y
+  `host = "auth-callback"`, y `MainActivity` llama a `supabase.handleDeeplinks(intent)` para
+  importar la sesión. La URL `org.mundocreativo.barronegro://auth-callback` debe estar en
+  *Redirect URLs*.
+- La recuperación de contraseña se pide desde *"¿Olvidaste tu contraseña?"*. Al abrir el enlace
+  el usuario entra con sesión y fija la clave nueva con el botón **Clave** de la cabecera.
+
+### Probar correos sin gastar cuota (local)
+
+```bash
+supabase start     # Postgres + Auth + Mailpit
+supabase status    # muestra la URL local y la de Mailpit (http://127.0.0.1:54324)
+```
+
+`supabase/config.toml` ya trae `[auth.email] enable_confirmations = true`. Todos los correos se
+capturan en Mailpit y no hay límite por hora.
+
+> No ejecutes `supabase config push`: este `config.toml` describe el stack **local** (su `site_url`
+> es `http://localhost:8080`). El `Site URL`, las *Redirect URLs* y el SMTP de producción se
+> configuran en el panel del proyecto alojado.
 
 ## Ajustes recomendados en el panel de Supabase
 
 - *Authentication → Providers → Email*: activar el proveedor y **Confirm email**.
-- *Authentication → URL Configuration*: incluir el dominio de la web, `http://localhost:8080/**`
-  y `org.mundocreativo.barronegro://auth-callback` (enlace profundo de Android).
+- *Authentication → URL Configuration*: `https://javierenrique00.github.io/barronegro/`,
+  `http://localhost:8080/**` y `org.mundocreativo.barronegro://auth-callback`.
 - *Authentication → Security*: si quieres una capa extra, activa **Cloudflare Turnstile**
   (el cliente ya soporta `captchaToken`; hoy no se envía porque el reto propio cubre el flujo).
-- *Authentication → SMTP*: configurar un proveedor propio antes de abrir al público.
+- *Authentication → SMTP*: Resend (o equivalente) antes de abrir al público; ver arriba.
 - Revisar `get_advisors` en el MCP de Supabase tras cualquier cambio de esquema.
 
 ## Pendientes conocidos
 
 - Subida de fotos desde la UI (los buckets y las políticas ya existen; falta el selector de archivos
   por plataforma).
-- Notificaciones por correo al aprobar o proponer una fecha.
+- Notificaciones por correo al aprobar o proponer una fecha: Supabase Auth solo envía correos de
+  autenticación, así que requieren un proveedor propio invocado desde una Edge Function o un
+  trigger de Postgres.
 - Realtime para que el panel del administrador se actualice sin pulsar "Actualizar".

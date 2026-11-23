@@ -122,6 +122,15 @@ fun PantallaAcceso(estado: EstadoApp) {
             Text(if (modoRegistro) "Ya tengo cuenta" else "Crear una cuenta nueva")
         }
 
+        if (!modoRegistro) {
+            TextButton(
+                onClick = { estado.recuperarContrasena(correo) },
+                enabled = correo.isNotBlank() && !estado.trabajando,
+            ) {
+                Text("¿Olvidaste tu contraseña?")
+            }
+        }
+
         if (modoRegistro) {
             Text(
                 "Te enviaremos un correo de confirmación. Confírmalo antes de iniciar sesión.",

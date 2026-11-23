@@ -38,6 +38,9 @@ class EstadoApp(private val alcance: CoroutineScope) {
 
     val esAdmin: Boolean get() = perfil?.esAdmin == true
 
+    /** Evita que la observación de sesión reaccione antes de que termine la carga inicial. */
+    private var sesionInicializada = false
+
     fun iniciar() {
         alcance.launch {
             try {
@@ -48,6 +51,23 @@ class EstadoApp(private val alcance: CoroutineScope) {
                 error = mensajeDeError(t)
             } finally {
                 cargando = false
+                sesionInicializada = true
+            }
+        }
+        alcance.launch { observarSesion() }
+    }
+
+    /**
+     * Una sesión puede aparecer después de la carga inicial: al abrir el enlace del correo de
+     * confirmación en Android, `handleDeeplinks` importa la sesión de forma asíncrona. Sin esto
+     * la interfaz seguiría mostrando el formulario de acceso.
+     */
+    private suspend fun observarSesion() {
+        Repositorio.estadoSesion().collect { autenticado ->
+            if (sesionInicializada && autenticado && !conectado) {
+                conectado = true
+                aviso = "Sesión iniciada desde el enlace del correo. Ya puedes reservar tu franja."
+                recargarInterno()
             }
         }
     }
@@ -97,6 +117,15 @@ class EstadoApp(private val alcance: CoroutineScope) {
         reservas = emptyList()
         pendientes = emptyList()
         bloqueos = emptyList()
+    }
+
+    fun recuperarContrasena(correo: String) =
+        accion("Te enviamos un correo para restablecer la contraseña.") {
+            Repositorio.recuperarContrasena(correo.trim())
+        }
+
+    fun cambiarContrasena(nueva: String) = accion("Contraseña actualizada") {
+        Repositorio.actualizarContrasena(nueva)
     }
 
     fun solicitar(horario: Horario, comentario: String?, tokenHumano: String, alTerminar: () -> Unit) =

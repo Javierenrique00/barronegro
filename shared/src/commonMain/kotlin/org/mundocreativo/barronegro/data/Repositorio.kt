@@ -2,8 +2,11 @@ package org.mundocreativo.barronegro.data
 
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -35,7 +38,7 @@ object Repositorio {
     }
 
     suspend fun registrar(correo: String, contrasena: String, nombre: String) {
-        supabase.auth.signUpWith(Email) {
+        supabase.auth.signUpWith(Email, urlRetornoAuth()) {
             email = correo
             password = contrasena
             data = buildJsonObject { put("nombre_completo", nombre) }
@@ -44,6 +47,28 @@ object Repositorio {
 
     suspend fun salir() {
         supabase.auth.signOut()
+    }
+
+    /** Envía el correo de recuperación. El enlace vuelve a la web o al enlace profundo de Android. */
+    suspend fun recuperarContrasena(correo: String) {
+        supabase.auth.resetPasswordForEmail(correo, urlRetornoAuth())
+    }
+
+    /** Cambia la contraseña del usuario con sesión activa (también tras abrir el enlace de recuperación). */
+    suspend fun actualizarContrasena(nueva: String) {
+        supabase.auth.updateUser { password = nueva }
+    }
+
+    /**
+     * Emite `true` cuando hay sesión y `false` cuando no la hay. Sirve para reflejar en la
+     * interfaz una sesión importada desde un enlace de correo (confirmación o recuperación).
+     */
+    fun estadoSesion(): Flow<Boolean> = supabase.auth.sessionStatus.mapNotNull { estado ->
+        when (estado) {
+            is SessionStatus.Authenticated -> true
+            is SessionStatus.NotAuthenticated -> false
+            else -> null
+        }
     }
 
     // --- Lectura ------------------------------------------------------------
