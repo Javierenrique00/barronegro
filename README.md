@@ -161,6 +161,22 @@ entrega a las direcciones del equipo de la organización (el resto falla con
    | Sender name | `Taller Barro Negro` |
 
    Brevo, SES, Postmark o SendGrid funcionan igual: solo cambian host, puerto y credenciales.
+
+   **Brevo**: host `smtp-relay.brevo.com`, puerto `587`, usuario = el **SMTP login** que muestra
+   *SMTP & API → SMTP* (formato `[ID]@smtp-brevo.com`), contraseña = **SMTP key** (`xsmtpsib-…`,
+   **no** la API v3) y el remitente debe estar verificado en *Senders*. No actives
+   *Security → Authorized IPs*: Supabase envía desde IPs compartidas y rotativas, y el bloqueo
+   haría fallar los correos con un error genérico.
+
+   El PATCH se puede automatizar con `supabase/configurar_smtp.py`, que lee las credenciales de
+   variables de entorno (nunca del repositorio) y aplica también las plantillas en español:
+
+   ```bash
+   export SUPABASE_ACCESS_TOKEN=sbp_...
+   export SMTP_KEY=xsmtpsib-...
+   export SMTP_FROM=barronegro.omd@gmail.com
+   python3 supabase/configurar_smtp.py
+   ```
 3. *Authentication → Sign In / Providers → Email*: **Confirm email** activado.
 4. *Authentication → Rate Limits*: sube el límite de correos por hora (el valor por defecto es
    bajo) y deja 60 s como frecuencia mínima por usuario.
