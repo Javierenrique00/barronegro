@@ -17,8 +17,10 @@ plugins {
 // archivo Kotlin común para que Android, JS y Wasm compartan los mismos valores.
 // ---------------------------------------------------------------------------
 val archivoLocal = rootProject.file("local.properties")
-val urlEntorno = providers.environmentVariable("SUPABASE_URL").orNull.orEmpty()
-val claveEntorno = providers.environmentVariable("SUPABASE_ANON_KEY").orNull.orEmpty()
+// trim(): GitHub guarda el valor de un secreto tal cual se pega. Un salto de línea
+// final rompería el literal de Kotlin que se genera más abajo.
+val urlEntorno = providers.environmentVariable("SUPABASE_URL").orNull.orEmpty().trim()
+val claveEntorno = providers.environmentVariable("SUPABASE_ANON_KEY").orNull.orEmpty().trim()
 val directorioConfiguracion = layout.buildDirectory.dir("generated/supabase")
 
 val generarConfiguracionSupabase = tasks.register("generarConfiguracionSupabase") {
@@ -37,14 +39,18 @@ val generarConfiguracionSupabase = tasks.register("generarConfiguracionSupabase"
         val archivo = File(rutaLocal)
         if (archivo.exists()) archivo.inputStream().use { propiedades.load(it) }
 
-        val url = urlDeEntorno.ifBlank { propiedades.getProperty("supabase.url").orEmpty() }
-        val clave = claveDeEntorno.ifBlank { propiedades.getProperty("supabase.anonKey").orEmpty() }
+        val url = urlDeEntorno.ifBlank { propiedades.getProperty("supabase.url").orEmpty() }.trim()
+        val clave = claveDeEntorno.ifBlank { propiedades.getProperty("supabase.anonKey").orEmpty() }.trim()
         require(url.startsWith("http")) {
             "Falta supabase.url en local.properties (o SUPABASE_URL en el entorno)"
         }
         require(clave.isNotBlank()) {
             "Falta supabase.anonKey en local.properties (o SUPABASE_ANON_KEY en el entorno)"
         }
+
+        // Escapa el valor para que siempre sea un literal de Kotlin válido.
+        fun literal(valor: String): String =
+            "\"" + valor.replace("\\", "\\\\").replace("\"", "\\\"").replace("\$", "\\\$") + "\""
 
         val destino = salida.get().asFile
         destino.parentFile.mkdirs()
@@ -54,8 +60,8 @@ val generarConfiguracionSupabase = tasks.register("generarConfiguracionSupabase"
 
             /** Generado por :shared:generarConfiguracionSupabase. No editar a mano. */
             object SupabaseConfig {
-                const val URL: String = "$url"
-                const val CLAVE_PUBLICA: String = "$clave"
+                const val URL: String = ${literal(url)}
+                const val CLAVE_PUBLICA: String = ${literal(clave)}
                 const val ID_SALA: String = "00000000-0000-4000-8000-000000000001"
                 const val NOMBRE_SALA: String = "Taller de cerámica"
                 const val ZONA_HORARIA: String = "America/Bogota"
