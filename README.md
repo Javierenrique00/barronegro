@@ -94,6 +94,42 @@ También se admiten las variables de entorno `SUPABASE_URL` y `SUPABASE_ANON_KEY
 ./gradlew :shared:wasmJsTest
 ```
 
+## Publicación en GitHub Pages
+
+La web (Wasm) se publica en **https://javierenrique00.github.io/barronegro/** cada vez que se hace
+push a `main`, mediante `.github/workflows/publicar-paginas.yml` (build → artefacto → `deploy-pages`).
+
+Configuración inicial (una sola vez):
+
+1. **GitHub → Settings → Pages → Build and deployment → Source**: elige **GitHub Actions**.
+2. **GitHub → Settings → Secrets and variables → Actions → New repository secret**:
+   - `SUPABASE_URL` → `https://qxsehofkuwmypuhjzult.supabase.co`
+   - `SUPABASE_ANON_KEY` → la clave pública (`anon`) del proyecto
+
+   El workflow las inyecta como variables de entorno, así que `local.properties` nunca se versiona.
+3. **Supabase → Authentication → URL Configuration**:
+   - **Site URL**: `https://javierenrique00.github.io/barronegro/`
+   - **Redirect URLs**: añade esa misma URL y conserva
+     `org.mundocreativo.barronegro://auth-callback` para Android.
+
+   Sin este paso los correos de confirmación siguen apuntando a `localhost` y el enlace no vuelve a
+   la web publicada.
+
+El sitio se sirve desde un subdirectorio (`/barronegro/`) pero `index.html` usa rutas relativas, así
+que no hace falta configurar ninguna base. La tarea `:webApp:prepararSitioPages` copia el bundle de
+producción a `webApp/build/pages`, descarta los `.map` y añade `.nojekyll`.
+
+Revisar el sitio antes de publicarlo:
+
+```bash
+./gradlew :webApp:prepararSitioPages
+python3 -m http.server 8080 --directory webApp/build/pages
+# abre http://localhost:8080/
+```
+
+> El bundle usa WebAssembly: funciona en navegadores modernos y necesita `https`
+> (GitHub Pages ya lo ofrece).
+
 ## Primer administrador
 
 El registro crea usuarios con rol `usuario`. Para habilitar el panel de administración, registra
