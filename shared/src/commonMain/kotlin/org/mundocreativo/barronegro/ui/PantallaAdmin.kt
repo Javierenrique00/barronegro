@@ -47,6 +47,7 @@ fun PantallaAdmin(estado: EstadoApp) {
 
     var rechazando by remember { mutableStateOf<Reserva?>(null) }
     var proponiendo by remember { mutableStateOf<Reserva?>(null) }
+    var cancelando by remember { mutableStateOf<FilaAgenda?>(null) }
 
     Column(
         modifier = Modifier
@@ -88,7 +89,7 @@ fun PantallaAdmin(estado: EstadoApp) {
                 Text("Franjas puntuales (opcional)", fontWeight = FontWeight.SemiBold)
                 Text(
                     "El horario semanal ya genera las franjas de todos los días. Usa esto solo para " +
-                        "publicar una fecha fuera de ese horario.",
+                            "publicar una fecha fuera de ese horario.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 CampoTextoAmplio(
@@ -156,7 +157,7 @@ fun PantallaAdmin(estado: EstadoApp) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             "${Formato.momentoCorto(bloqueo.desde)} → ${Formato.momentoCorto(bloqueo.hasta)}" +
-                                (bloqueo.motivo?.let { " · $it" } ?: ""),
+                                    (bloqueo.motivo?.let { " · $it" } ?: ""),
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
@@ -179,7 +180,7 @@ fun PantallaAdmin(estado: EstadoApp) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             Formato.fechaLarga(reserva.fecha) + " · " +
-                                Formato.rangoHora(reserva.horaInicio, reserva.horaFin),
+                                    Formato.rangoHora(reserva.horaInicio, reserva.horaFin),
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f),
                         )
@@ -188,9 +189,22 @@ fun PantallaAdmin(estado: EstadoApp) {
                     reserva.comentarioUsuario?.takeIf { it.isNotBlank() }?.let {
                         Text("Comentario del usuario: $it", style = MaterialTheme.typography.bodySmall)
                     }
+                    val contacto = listOfNotNull(
+                        reserva.nombreContacto?.takeIf { it.isNotBlank() },
+                        reserva.correoContacto?.takeIf { it.isNotBlank() },
+                        reserva.telefonoContacto?.takeIf { it.isNotBlank() },
+                    ).joinToString(" · ")
+                    if (contacto.isNotBlank()) {
+                        Text(contacto, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (reserva.esAnonima) {
+                        Text("Reserva anónima", style = MaterialTheme.typography.labelSmall)
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { estado.aprobarReserva(reserva.id) }) { Text("Aprobar") }
-                        OutlinedButton(onClick = { proponiendo = reserva }) { Text("Proponer otra fecha") }
+                        if (!reserva.esAnonima) {
+                            OutlinedButton(onClick = { proponiendo = reserva }) { Text("Proponer otra fecha") }
+                        }
                         TextButton(onClick = { rechazando = reserva }) { Text("Rechazar") }
                     }
                 }
@@ -204,7 +218,7 @@ fun PantallaAdmin(estado: EstadoApp) {
         if (agendaActiva.isEmpty()) {
             Text("Todavía no hay reservas próximas.", style = MaterialTheme.typography.bodySmall)
         }
-        agendaActiva.forEach { fila -> TarjetaAgenda(estado, fila) }
+        agendaActiva.forEach { fila -> TarjetaAgenda(estado, fila) { cancelando = fila } }
     }
 
     rechazando?.let { reserva ->
@@ -220,6 +234,54 @@ fun PantallaAdmin(estado: EstadoApp) {
             proponiendo = null
         }
     }
+
+    cancelando?.let { fila ->
+        DialogoCancelarAgenda(
+            fila = fila,
+            alCerrar = { cancelando = null },
+            alConfirmar = { motivo ->
+                estado.cancelarReservaAdmin(fila.reservaId, motivo)
+                cancelando = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun DialogoCancelarAgenda(
+    fila: FilaAgenda,
+    alCerrar: () -> Unit,
+    alConfirmar: (String?) -> Unit,
+) {
+    var motivo by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = alCerrar,
+        title = { Text("Cancelar reserva") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    Formato.fechaLarga(fila.fecha) + " · " +
+                            Formato.rangoHora(fila.horaInicio, fila.horaFin),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    if (!fila.correo.isNullOrBlank()) {
+                        "Se enviará un correo de cancelación a ${fila.correo}."
+                    } else {
+                        "Esta reserva no tiene correo de contacto; no se enviará aviso automático."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                CampoTexto(motivo, { motivo = it }, "Motivo (opcional)")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { alConfirmar(motivo.trim().ifBlank { null }) }) {
+                Text("Cancelar y avisar")
+            }
+        },
+        dismissButton = { TextButton(onClick = alCerrar) { Text("Volver") } },
+    )
 }
 
 @Composable
@@ -236,7 +298,7 @@ private fun DialogoRechazo(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "${Formato.fechaLarga(reserva.fecha)} · " +
-                        Formato.rangoHora(reserva.horaInicio, reserva.horaFin),
+                            Formato.rangoHora(reserva.horaInicio, reserva.horaFin),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 CampoTexto(motivo, { motivo = it }, "Motivo del rechazo")
@@ -269,7 +331,7 @@ private fun DialogoPropuesta(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "Solicitud original: ${Formato.fechaLarga(reserva.fecha)} · " +
-                        Formato.rangoHora(reserva.horaInicio, reserva.horaFin),
+                            Formato.rangoHora(reserva.horaInicio, reserva.horaFin),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 CampoTexto(fecha, { fecha = it }, "Nueva fecha", ayuda = "AAAA-MM-DD")
@@ -296,6 +358,7 @@ private fun DialogoPropuesta(
         dismissButton = { TextButton(onClick = alCerrar) { Text("Cancelar") } },
     )
 }
+
 private data class DiaHorario(
     val dia: Int,
     val activo: Boolean,
@@ -340,7 +403,7 @@ private fun HorarioSemanal(estado: EstadoApp) {
             Text("Horario semanal", fontWeight = FontWeight.SemiBold)
             Text(
                 "Con estas horas se generan las franjas de todos los días; los usuarios reservan " +
-                    "directamente sobre ellas. Formato HH:MM.",
+                        "directamente sobre ellas. Formato HH:MM.",
                 style = MaterialTheme.typography.bodySmall,
             )
 
@@ -411,8 +474,8 @@ private fun PoliticaReservas(estado: EstadoApp) {
     val sala = estado.sala
     val firma = sala?.let {
         "${it.duracionTurnoMin},${it.duracionMaximaMin},${it.bufferMin},${it.antelacionMinHoras}," +
-            "${it.diasMaxAntelacion},${it.capacidadPorTurno},${it.aprobacionAutomatica}," +
-            "${it.maxReservasPorDia}"
+                "${it.diasMaxAntelacion},${it.capacidadPorTurno},${it.aprobacionAutomatica}," +
+                "${it.maxReservasPorDia}"
     }
 
     var turno by remember { mutableStateOf("60") }
@@ -514,7 +577,7 @@ private fun PoliticaReservas(estado: EstadoApp) {
 
 /** Una reserva próxima con los datos de contacto de la persona. */
 @Composable
-private fun TarjetaAgenda(estado: EstadoApp, fila: FilaAgenda) {
+private fun TarjetaAgenda(estado: EstadoApp, fila: FilaAgenda, alCancelar: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -523,23 +586,34 @@ private fun TarjetaAgenda(estado: EstadoApp, fila: FilaAgenda) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     Formato.fechaLarga(fila.fecha) + " · " +
-                        Formato.rangoHora(fila.horaInicio, fila.horaFin),
+                            Formato.rangoHora(fila.horaInicio, fila.horaFin),
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
                 EtiquetaEstado(fila.estado)
             }
             Text(
-                fila.nombre.ifBlank { "Sin nombre" } +
-                    (fila.telefono?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                listOfNotNull(
+                    fila.nombre.ifBlank { "Sin nombre" },
+                    fila.telefono?.takeIf { it.isNotBlank() },
+                    fila.correo?.takeIf { it.isNotBlank() },
+                ).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
             )
+            if (fila.esAnonima) {
+                Text("Reserva anónima · identificada por el navegador", style = MaterialTheme.typography.labelSmall)
+            }
             fila.comentario?.takeIf { it.isNotBlank() }?.let {
                 Text("Comentario: $it", style = MaterialTheme.typography.bodySmall)
             }
-            if (fila.estado == "aprobada" || fila.estado == "pendiente") {
-                TextButton(onClick = { estado.cancelarReserva(fila.reservaId) }) {
-                    Text("Cancelar reserva")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (fila.estado == "aprobada" || fila.estado == "pendiente" || fila.estado == "reprogramada") {
+                    TextButton(onClick = alCancelar) { Text("Cancelar reserva") }
+                }
+                if (!fila.correo.isNullOrBlank()) {
+                    TextButton(onClick = { estado.reenviarCorreoReserva(fila.reservaId) }) {
+                        Text("Reenviar correo")
+                    }
                 }
             }
         }

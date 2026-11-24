@@ -80,9 +80,11 @@ object Repositorio {
             .decodeSingleOrNull()
     }
 
-    suspend fun sala(): Sala? = supabase.postgrest.from("salas")
-        .select { filter { eq("id", SALA) } }
-        .decodeSingleOrNull()
+    /** Datos públicos de la sala; también funciona para visitantes anónimos. */
+    suspend fun salaPublica(): Sala? = supabase.postgrest.rpc(
+        "sala_publica",
+        buildJsonObject { put("p_sala_id", SALA) },
+    ).decodeList<Sala>().firstOrNull()
 
     suspend fun horariosDesde(desde: String): List<Horario> = supabase.postgrest.from("horarios")
         .select {
@@ -142,18 +144,46 @@ object Repositorio {
 
     // --- Verificación humana ------------------------------------------------
 
-    suspend fun crearReto(): RetoHumano =
-        supabase.postgrest.rpc("crear_reto_humano").decodeAs()
+    /** Reto para una cuenta autenticada o para el navegador anónimo (con su sesión). */
+    suspend fun crearReto(correo: String? = null, sesion: String? = null): RetoHumano =
+        if (sesion == null) {
+            supabase.postgrest.rpc("crear_reto_humano").decodeAs()
+        } else {
+            supabase.postgrest.rpc(
+                "crear_reto_humano_anonimo",
+                buildJsonObject {
+                    put("p_sesion", sesion)
+                    put("p_correo", correo.orEmpty())
+                },
+            ).decodeAs()
+        }
 
-    suspend fun verificarReto(retoId: String, piezaId: Int, duracionMs: Int): TokenHumano =
-        supabase.postgrest.rpc(
-            "verificar_reto_humano",
-            buildJsonObject {
-                put("p_reto_id", retoId)
-                put("p_pieza_id", piezaId)
-                put("p_duracion_ms", duracionMs)
-            },
-        ).decodeAs()
+    suspend fun verificarReto(
+        retoId: String,
+        piezaId: Int,
+        duracionMs: Int,
+        sesion: String? = null,
+    ): TokenHumano =
+        if (sesion == null) {
+            supabase.postgrest.rpc(
+                "verificar_reto_humano",
+                buildJsonObject {
+                    put("p_reto_id", retoId)
+                    put("p_pieza_id", piezaId)
+                    put("p_duracion_ms", duracionMs)
+                },
+            ).decodeAs()
+        } else {
+            supabase.postgrest.rpc(
+                "verificar_reto_humano_anonimo",
+                buildJsonObject {
+                    put("p_reto_id", retoId)
+                    put("p_pieza_id", piezaId)
+                    put("p_duracion_ms", duracionMs)
+                    put("p_sesion", sesion)
+                },
+            ).decodeAs()
+        }
 
     // --- Reservas -----------------------------------------------------------
 
@@ -179,6 +209,73 @@ object Repositorio {
             put("p_token_humano", tokenHumano)
         },
     ).decodeAs()
+
+    suspend fun crearSesionAnonima(): SesionAnonima =
+        supabase.postgrest.rpc("crear_sesion_anonima").decodeAs()
+
+    /** Reserva anónima identificada por la sesión de la cookie. */
+    suspend fun reservarFranjaAnonima(
+        fecha: String,
+        horaInicio: String,
+        duracionMin: Int,
+        nombre: String?,
+        correo: String,
+        telefono: String,
+        comentario: String?,
+        tokenHumano: String,
+        sesion: String,
+    ): ConfirmacionReserva = supabase.postgrest.rpc(
+        "reservar_franja_anonima",
+        buildJsonObject {
+            put("p_sala_id", SALA)
+            put("p_fecha", fecha)
+            put("p_hora_inicio", horaInicio)
+            put("p_duracion_min", duracionMin)
+            put("p_nombre", nombre)
+            put("p_correo", Contacto.normalizarCorreo(correo))
+            put("p_telefono", Contacto.normalizarTelefono(telefono))
+            put("p_comentario", comentario)
+            put("p_token_humano", tokenHumano)
+            put("p_sesion", sesion)
+        },
+    ).decodeAs()
+
+    suspend fun misReservasAnonimas(sesion: String): List<ReservaAnonima> =
+        supabase.postgrest.rpc(
+            "mis_reservas_anonimas",
+            buildJsonObject { put("p_sesion", sesion) },
+        ).decodeList()
+
+    suspend fun cancelarReservaAnonima(reservaId: String, sesion: String, motivo: String? = null) {
+        supabase.postgrest.rpc(
+            "cancelar_reserva_anonima",
+            buildJsonObject {
+                put("p_reserva_id", reservaId)
+                put("p_sesion", sesion)
+                put("p_motivo", motivo)
+            },
+        )
+    }
+
+    suspend fun cancelarReservaAdmin(reservaId: String, motivo: String? = null) {
+        supabase.postgrest.rpc(
+            "cancelar_reserva_admin",
+            buildJsonObject {
+                put("p_reserva_id", reservaId)
+                put("p_motivo", motivo)
+            },
+        )
+    }
+
+    suspend fun reenviarCorreoReserva(reservaId: String, tipo: String? = null) {
+        supabase.postgrest.rpc(
+            "reenviar_correo_reserva",
+            buildJsonObject {
+                put("p_reserva_id", reservaId)
+                put("p_tipo", tipo)
+            },
+        )
+    }
 
     /** Flujo anterior sobre franjas creadas a mano. Se conserva por compatibilidad. */
     suspend fun solicitarReserva(horarioId: String, comentario: String?, tokenHumano: String): String =

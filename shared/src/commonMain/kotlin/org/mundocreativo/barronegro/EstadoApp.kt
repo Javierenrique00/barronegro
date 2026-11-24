@@ -8,6 +8,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import org.mundocreativo.barronegro.data.Bloqueo
+import org.mundocreativo.barronegro.data.ConfirmacionReserva
+import org.mundocreativo.barronegro.data.Contacto
 import org.mundocreativo.barronegro.data.FilaAgenda
 import org.mundocreativo.barronegro.data.FranjaDisponible
 import org.mundocreativo.barronegro.data.Horario
@@ -16,7 +18,11 @@ import org.mundocreativo.barronegro.data.PreferenciasApp
 import org.mundocreativo.barronegro.data.ReglaDisponibilidad
 import org.mundocreativo.barronegro.data.Repositorio
 import org.mundocreativo.barronegro.data.Reserva
+import org.mundocreativo.barronegro.data.ReservaAnonima
 import org.mundocreativo.barronegro.data.Sala
+import org.mundocreativo.barronegro.data.borrarSesionAnonima
+import org.mundocreativo.barronegro.data.guardarSesionAnonima
+import org.mundocreativo.barronegro.data.leerSesionAnonima
 
 /** Estado compartido de la aplicación (web y Android usan exactamente el mismo). */
 class EstadoApp(private val alcance: CoroutineScope) {
@@ -56,6 +62,18 @@ class EstadoApp(private val alcance: CoroutineScope) {
     var agenda by mutableStateOf<List<FilaAgenda>>(emptyList())
         private set
 
+    /** Reservas hechas desde este navegador sin cuenta. */
+    var reservasAnonimas by mutableStateOf<List<ReservaAnonima>>(emptyList())
+        private set
+
+    /** Sesión anónima actual (el valor de la cookie). */
+    var sesionAnonima by mutableStateOf<String?>(null)
+        private set
+
+    /** Respuesta de la última reserva anónima para el diálogo de éxito. */
+    var confirmacion by mutableStateOf<ConfirmacionReserva?>(null)
+        private set
+
     /** Mes que muestra el calendario. */
     var mesCalendario by mutableStateOf(MesCalendario.actual())
         private set
@@ -77,9 +95,15 @@ class EstadoApp(private val alcance: CoroutineScope) {
                 // automático con las credenciales guardadas.
                 if (Repositorio.idUsuarioActual() == null) entrarConCredencialesGuardadas()
                 conectado = Repositorio.idUsuarioActual() != null
+                if (conectado) sembrarPerfilRecordado()
+
+                // El calendario es público: se carga siempre, con o sin cuenta.
+                val sesion = if (conectado) null else asegurarSesionAnonima()
+                cargarPublico()
                 if (conectado) {
-                    sembrarPerfilRecordado()
-                    recargarInterno()
+                    cargarPrivado()
+                } else if (sesion != null) {
+                    cargarAnonimo(sesion)
                 }
             } catch (t: Throwable) {
                 error = mensajeDeError(t)
@@ -125,10 +149,31 @@ class EstadoApp(private val alcance: CoroutineScope) {
      */
     private suspend fun observarSesion() {
         Repositorio.estadoSesion().collect { autenticado ->
-            if (sesionInicializada && autenticado && !conectado) {
-                conectado = true
-                aviso = "Sesión iniciada desde el enlace del correo. Ya puedes reservar tu franja."
-                recargarInterno()
+            if (!sesionInicializada) return@collect
+            when {
+                autenticado && !conectado -> {
+                    conectado = true
+                    aviso = "Sesión iniciada desde el enlace del correo."
+                    try {
+                        cargarPrivado()
+                        cargarPublico()
+                    } catch (t: Throwable) {
+                        error = mensajeDeError(t)
+                    }
+                }
+
+                !autenticado && conectado -> {
+                    conectado = false
+                    perfil = null
+                    limpiarPrivado()
+                    try {
+                        val sesion = asegurarSesionAnonima()
+                        cargarPublico()
+                        cargarAnonimo(sesion)
+                    } catch (t: Throwable) {
+                        error = mensajeDeError(t)
+                    }
+                }
             }
         }
     }
@@ -141,41 +186,101 @@ class EstadoApp(private val alcance: CoroutineScope) {
         if (Repositorio.idUsuarioActual() == null) {
             conectado = false
             perfil = null
-            PreferenciasApp.olvidarPerfil()
+            limpiarPrivado()
+            try {
+                val sesion = asegurarSesionAnonima()
+                cargarPublico()
+                cargarAnonimo(sesion)
+            } catch (t: Throwable) {
+                error = mensajeDeError(t)
+            }
             return
         }
+
         try {
-            val perfilRemoto = Repositorio.miPerfil()
-            perfil = perfilRemoto
-            if (perfilRemoto != null) {
-                PreferenciasApp.recordarPerfil(perfilRemoto.nombreCompleto, perfilRemoto.rol)
-            }
-            val hoy = fechaHoyIso()
-            val salaRemota = Repositorio.sala()
-            sala = salaRemota
-            calendarioAbierto = salaRemota?.calendarioAbierto ?: true
-            horarios = Repositorio.horariosDesde(hoy)
-            franjas = Repositorio.franjasDisponibles(
-                mesCalendario.primerDiaIso(),
-                mesCalendario.ultimoDiaIso(),
-            )
-            reservas = Repositorio.misReservas()
-            bloqueos = Repositorio.bloqueos()
-            if (perfil?.esAdmin == true) {
-                pendientes = Repositorio.reservasPorResolver()
-                reglas = Repositorio.reglasDisponibilidad()
-                agenda = Repositorio.agendaAdmin()
-            } else {
-                pendientes = emptyList()
-                reglas = emptyList()
-                agenda = emptyList()
-            }
+            cargarPrivado()
+            cargarPublico()
             conectado = true
         } catch (t: Throwable) {
             error = mensajeDeError(t)
             // La sesión guardada sigue siendo válida aunque falle la red: no devolver al formulario.
             conectado = Repositorio.idUsuarioActual() != null
         }
+    }
+
+    private suspend fun cargarPublico() {
+        val salaRemota = Repositorio.salaPublica()
+        sala = salaRemota
+        calendarioAbierto = salaRemota?.calendarioAbierto ?: true
+        franjas = Repositorio.franjasDisponibles(
+            mesCalendario.primerDiaIso(),
+            mesCalendario.ultimoDiaIso(),
+        )
+    }
+
+    private suspend fun cargarPrivado() {
+        val perfilRemoto = Repositorio.miPerfil()
+        perfil = perfilRemoto
+        if (perfilRemoto != null) {
+            PreferenciasApp.recordarPerfil(perfilRemoto.nombreCompleto, perfilRemoto.rol)
+        }
+        val hoy = fechaHoyIso()
+        horarios = Repositorio.horariosDesde(hoy)
+        reservas = Repositorio.misReservas()
+        bloqueos = Repositorio.bloqueos()
+        reservasAnonimas = emptyList()
+        if (perfil?.esAdmin == true) {
+            pendientes = Repositorio.reservasPorResolver()
+            reglas = Repositorio.reglasDisponibilidad()
+            agenda = Repositorio.agendaAdmin()
+        } else {
+            pendientes = emptyList()
+            reglas = emptyList()
+            agenda = emptyList()
+        }
+    }
+
+    private suspend fun cargarAnonimo(sesion: String) {
+        reservasAnonimas = Repositorio.misReservasAnonimas(sesion)
+    }
+
+    private fun limpiarPrivado() {
+        horarios = emptyList()
+        reservas = emptyList()
+        pendientes = emptyList()
+        bloqueos = emptyList()
+        reglas = emptyList()
+        agenda = emptyList()
+    }
+
+    /**
+     * Recupera la cookie local o pide a Postgres una sesión nueva. La sesión es solo un
+     * identificador aleatorio; no crea ningún usuario ni guarda datos personales.
+     */
+    private suspend fun asegurarSesionAnonima(): String {
+        val guardada = leerSesionAnonima()
+        if (!guardada.isNullOrBlank() && guardada.matches(Regex("^[0-9a-f]{64}$"))) {
+            sesionAnonima = guardada
+            return guardada
+        }
+        val nueva = Repositorio.crearSesionAnonima()
+        sesionAnonima = nueva.clave
+        if (!guardarSesionAnonima(nueva.clave)) {
+            aviso = "No pudimos guardar la cookie de este navegador. Podrás reservar, " +
+                    "pero no ver tus reservas al volver."
+        }
+        return nueva.clave
+    }
+
+    fun cerrarConfirmacion() {
+        confirmacion = null
+    }
+
+    /** Borra la cookie/sesión local. Las reservas siguen existiendo, pero este navegador las olvida. */
+    fun olvidarNavegador() = accion("Este navegador ya no recordará tus reservas anónimas") {
+        borrarSesionAnonima()
+        sesionAnonima = null
+        reservasAnonimas = emptyList()
     }
 
     fun entrar(correo: String, contrasena: String) = accion("Sesión iniciada") {
@@ -249,6 +354,68 @@ class EstadoApp(private val alcance: CoroutineScope) {
         )
         alTerminar()
     }
+
+    /**
+     * Reserva anónima: el navegador se identifica con la sesión de la cookie. El correo y el
+     * teléfono son obligatorios; Postgres vuelve a validarlos junto con la franja y el token.
+     */
+    fun reservarAnonimo(
+        franja: FranjaDisponible,
+        duracionMin: Int,
+        nombre: String,
+        correo: String,
+        telefono: String,
+        comentario: String?,
+        tokenHumano: String,
+        alTerminar: () -> Unit,
+    ) {
+        alcance.launch {
+            trabajando = true
+            try {
+                val sesion = asegurarSesionAnonima()
+                confirmacion = Repositorio.reservarFranjaAnonima(
+                    fecha = franja.fecha,
+                    horaInicio = franja.horaInicio,
+                    duracionMin = duracionMin,
+                    nombre = Contacto.nombre(nombre),
+                    correo = correo,
+                    telefono = telefono,
+                    comentario = comentario?.ifBlank { null },
+                    tokenHumano = tokenHumano,
+                    sesion = sesion,
+                )
+                error = null
+                alTerminar()
+                try {
+                    cargarPublico()
+                    cargarAnonimo(sesion)
+                } catch (t: Throwable) {
+                    error = mensajeDeError(t)
+                }
+            } catch (t: Throwable) {
+                error = mensajeDeError(t)
+            } finally {
+                trabajando = false
+            }
+        }
+    }
+
+    fun cancelarReservaAnonima(id: String, motivo: String? = null) =
+        accion("Reserva cancelada") {
+            val sesion = sesionAnonima
+                ?: error("Este navegador no tiene una sesión anónima")
+            Repositorio.cancelarReservaAnonima(id, sesion, motivo)
+        }
+
+    fun cancelarReservaAdmin(id: String, motivo: String? = null) =
+        accion("Reserva cancelada y correo de cancelación solicitado") {
+            Repositorio.cancelarReservaAdmin(id, motivo)
+        }
+
+    fun reenviarCorreoReserva(id: String, tipo: String? = null) =
+        accion("Correo reenviado") {
+            Repositorio.reenviarCorreoReserva(id, tipo)
+        }
 
     /** Cambia el mes del calendario y recarga solo las franjas de ese mes. */
     fun cambiarMes(meses: Int) {

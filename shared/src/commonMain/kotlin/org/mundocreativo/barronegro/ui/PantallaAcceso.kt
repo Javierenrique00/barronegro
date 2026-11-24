@@ -32,7 +32,7 @@ import org.mundocreativo.barronegro.EstadoApp
 import org.mundocreativo.barronegro.data.PreferenciasApp
 
 @Composable
-fun PantallaAcceso(estado: EstadoApp) {
+fun PantallaAcceso(estado: EstadoApp, alVolver: (() -> Unit)? = null) {
     var modoRegistro by remember { mutableStateOf(false) }
     var nombre by remember { mutableStateOf("") }
     var correo by remember { mutableStateOf(PreferenciasApp.correoRecordado().orEmpty()) }
@@ -49,6 +49,11 @@ fun PantallaAcceso(estado: EstadoApp) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(24.dp))
+        if (alVolver != null) {
+            TextButton(onClick = alVolver, modifier = Modifier.fillMaxWidth()) {
+                Text("← Volver al calendario")
+            }
+        }
         Text(
             "Taller de cerámica",
             style = MaterialTheme.typography.headlineMedium,
@@ -103,7 +108,7 @@ fun PantallaAcceso(estado: EstadoApp) {
                 }
             },
             enabled = correo.isNotBlank() && contrasena.length >= 8 &&
-                (!modoRegistro || nombre.isNotBlank()) && !estado.trabajando,
+                    (!modoRegistro || nombre.isNotBlank()) && !estado.trabajando,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(

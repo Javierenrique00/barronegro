@@ -39,12 +39,14 @@ import androidx.compose.ui.unit.dp
 import org.mundocreativo.barronegro.data.PreferenciasApp
 import org.mundocreativo.barronegro.data.SupabaseConfig
 import org.mundocreativo.barronegro.ui.CajaCentrada
+import org.mundocreativo.barronegro.ui.DialogoReservaConfirmada
 import org.mundocreativo.barronegro.ui.MensajeAviso
 import org.mundocreativo.barronegro.ui.MensajeError
 import org.mundocreativo.barronegro.ui.PantallaAcceso
 import org.mundocreativo.barronegro.ui.PantallaAdmin
 import org.mundocreativo.barronegro.ui.PantallaCalendario
 import org.mundocreativo.barronegro.ui.PantallaReservas
+import org.mundocreativo.barronegro.ui.PantallaReservasAnonimas
 
 private val ColoresTaller = lightColorScheme(
     primary = Color(0xFF8A4B2A),
@@ -67,14 +69,18 @@ fun App() {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             val alcance = rememberCoroutineScope()
             val estado = remember { EstadoApp(alcance) }
+            var mostrarAcceso by remember { mutableStateOf(false) }
 
             LaunchedEffect(Unit) { estado.iniciar() }
+            LaunchedEffect(estado.conectado) {
+                if (estado.conectado) mostrarAcceso = false
+            }
 
             Column(modifier = Modifier.fillMaxSize().safeContentPadding()) {
                 when {
                     estado.cargando -> CajaCentrada { CircularProgressIndicator() }
-                    !estado.conectado -> PantallaAcceso(estado)
-                    else -> ContenidoPrincipal(estado)
+                    mostrarAcceso -> PantallaAcceso(estado, alVolver = { mostrarAcceso = false })
+                    else -> ContenidoPrincipal(estado, alEntrar = { mostrarAcceso = true })
                 }
             }
         }
@@ -82,11 +88,18 @@ fun App() {
 }
 
 @Composable
-private fun ContenidoPrincipal(estado: EstadoApp) {
+private fun ContenidoPrincipal(estado: EstadoApp, alEntrar: () -> Unit) {
     // Se recuerda la pestaña abierta; un administrador vuelve directamente a su panel.
     val pestanaGuardada = remember { PreferenciasApp.pestanaRecordada() }
     var pestana by remember {
-        mutableStateOf(pestanaGuardada ?: if (estado.esAdmin) 2 else 0)
+        mutableStateOf(
+            when {
+                pestanaGuardada == 2 && !estado.esAdmin -> 0
+                pestanaGuardada != null -> pestanaGuardada
+                estado.esAdmin -> 2
+                else -> 0
+            },
+        )
     }
 
     LaunchedEffect(estado.esAdmin) {
@@ -99,14 +112,14 @@ private fun ContenidoPrincipal(estado: EstadoApp) {
     LaunchedEffect(pestana) { PreferenciasApp.recordarPestana(pestana) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Cabecera(estado)
+        Cabecera(estado, alEntrar)
         if (estado.trabajando) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
         Box(modifier = Modifier.weight(1f)) {
             when (pestana) {
                 0 -> PantallaCalendario(estado)
-                1 -> PantallaReservas(estado)
+                1 -> if (estado.conectado) PantallaReservas(estado) else PantallaReservasAnonimas(estado)
                 else -> if (estado.esAdmin) PantallaAdmin(estado) else PantallaCalendario(estado)
             }
         }
@@ -134,10 +147,14 @@ private fun ContenidoPrincipal(estado: EstadoApp) {
             }
         }
     }
+
+    estado.confirmacion?.let { confirmacion ->
+        DialogoReservaConfirmada(confirmacion) { estado.cerrarConfirmacion() }
+    }
 }
 
 @Composable
-private fun Cabecera(estado: EstadoApp) {
+private fun Cabecera(estado: EstadoApp, alEntrar: () -> Unit) {
     val perfil = estado.perfil
     var cambiarClave by remember { mutableStateOf(false) }
 
@@ -154,16 +171,20 @@ private fun Cabecera(estado: EstadoApp) {
             )
             Text(
                 perfil?.let { "${it.nombreVisible} · ${if (it.esAdmin) "Administrador" else "Usuario"}" }
-                    ?: "",
+                    ?: "Reserva sin crear cuenta",
                 style = MaterialTheme.typography.labelSmall,
             )
         }
         TextButton(onClick = { estado.recargar() }) { Text("Actualizar") }
-        TextButton(onClick = { cambiarClave = true }) { Text("Clave") }
-        TextButton(onClick = { estado.salir() }) { Text("Salir") }
+        if (estado.conectado) {
+            TextButton(onClick = { cambiarClave = true }) { Text("Clave") }
+            TextButton(onClick = { estado.salir() }) { Text("Salir") }
+        } else {
+            TextButton(onClick = alEntrar) { Text("Entrar") }
+        }
     }
 
-    if (cambiarClave) {
+    if (cambiarClave && estado.conectado) {
         DialogoCambiarContrasena(
             alCerrar = { cambiarClave = false },
             alGuardar = { nueva ->

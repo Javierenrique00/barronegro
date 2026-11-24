@@ -53,9 +53,9 @@ data class Horario(
 @Serializable
 data class Reserva(
     val id: String,
-    @SerialName("horario_id") val horarioId: String,
+    @SerialName("horario_id") val horarioId: String? = null,
     @SerialName("sala_id") val salaId: String? = null,
-    @SerialName("usuario_id") val usuarioId: String,
+    @SerialName("usuario_id") val usuarioId: String? = null,
     val fecha: String,
     @SerialName("hora_inicio") val horaInicio: String,
     @SerialName("hora_fin") val horaFin: String,
@@ -65,8 +65,14 @@ data class Reserva(
     @SerialName("propuesta_fecha") val propuestaFecha: String? = null,
     @SerialName("propuesta_hora_inicio") val propuestaHoraInicio: String? = null,
     @SerialName("propuesta_hora_fin") val propuestaHoraFin: String? = null,
+    @SerialName("nombre_contacto") val nombreContacto: String? = null,
+    @SerialName("correo_contacto") val correoContacto: String? = null,
+    @SerialName("telefono_contacto") val telefonoContacto: String? = null,
+    val origen: String = "cuenta",
     @SerialName("creado_en") val creadoEn: String? = null,
-)
+) {
+    val esAnonima: Boolean get() = origen == "anonima"
+}
 
 @Serializable
 data class Bloqueo(
@@ -122,10 +128,54 @@ data class FilaAgenda(
     @SerialName("hora_inicio") val horaInicio: String,
     @SerialName("hora_fin") val horaFin: String,
     val estado: String,
-    @SerialName("usuario_id") val usuarioId: String,
+    @SerialName("usuario_id") val usuarioId: String? = null,
     val nombre: String = "",
     val telefono: String? = null,
+    val correo: String? = null,
     val comentario: String? = null,
+    val origen: String = "cuenta",
+) {
+    val esAnonima: Boolean get() = origen == "anonima"
+}
+
+/** Respuesta de `reservar_franja_anonima(...)`. */
+@Serializable
+data class ConfirmacionReserva(
+    @SerialName("reserva_id") val reservaId: String,
+    val codigo: String = "",
+    val estado: String,
+    val fecha: String,
+    @SerialName("hora_inicio") val horaInicio: String,
+    @SerialName("hora_fin") val horaFin: String,
+    val correo: String = "",
+    val nombre: String = "",
+) {
+    val confirmada: Boolean get() = estado == "aprobada"
+}
+
+/** Fila de `mis_reservas_anonimas(...)`, identificada por la cookie del navegador. */
+@Serializable
+data class ReservaAnonima(
+    @SerialName("reserva_id") val reservaId: String,
+    val fecha: String,
+    @SerialName("hora_inicio") val horaInicio: String,
+    @SerialName("hora_fin") val horaFin: String,
+    val estado: String,
+    @SerialName("nombre_contacto") val nombreContacto: String? = null,
+    @SerialName("correo_contacto") val correoContacto: String? = null,
+    @SerialName("telefono_contacto") val telefonoContacto: String? = null,
+    @SerialName("comentario_usuario") val comentarioUsuario: String? = null,
+    @SerialName("comentario_admin") val comentarioAdmin: String? = null,
+    @SerialName("creado_en") val creadoEn: String? = null,
+) {
+    val activa: Boolean get() = estado == "pendiente" || estado == "aprobada" || estado == "reprogramada"
+}
+
+/** Sesión aleatoria emitida por Postgres y guardada en la cookie del navegador. */
+@Serializable
+data class SesionAnonima(
+    val clave: String,
+    @SerialName("expira_en") val expiraEn: String? = null,
 )
 
 @Serializable

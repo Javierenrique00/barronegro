@@ -25,6 +25,7 @@ object PreferenciasApp {
     private const val CLAVE_NOMBRE = "barronegro.nombre"
     private const val CLAVE_ROL = "barronegro.rol"
     private const val CLAVE_PESTANA = "barronegro.pestana"
+    private const val CLAVE_SESION_ANONIMA = "barronegro.sesion_anonima"
 
     private val ajustes: Settings by lazy { Settings() }
 
@@ -69,6 +70,14 @@ object PreferenciasApp {
     fun pestanaRecordada(): Int? = leer { ajustes.getIntOrNull(CLAVE_PESTANA) }
 
     fun recordarPestana(indice: Int) = escribir { ajustes.putInt(CLAVE_PESTANA, indice) }
+
+    // --- Sesión anónima -----------------------------------------------------
+
+    fun sesionAnonima(): String? = leer { ajustes.getStringOrNull(CLAVE_SESION_ANONIMA) }
+
+    fun recordarSesionAnonima(valor: String) = escribir { ajustes.putString(CLAVE_SESION_ANONIMA, valor) }
+
+    fun olvidarSesionAnonima() = escribir { ajustes.remove(CLAVE_SESION_ANONIMA) }
 
     // Un fallo de almacenamiento (preview, tests, permisos) nunca debe romper la app.
     private fun <T> leer(bloque: () -> T?): T? = runCatching(bloque).getOrNull()

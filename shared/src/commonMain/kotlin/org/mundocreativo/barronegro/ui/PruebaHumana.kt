@@ -42,6 +42,8 @@ import kotlin.time.TimeSource
 @Composable
 fun PruebaHumana(
     modifier: Modifier = Modifier,
+    correo: String? = null,
+    sesion: String? = null,
     onVerificado: (String) -> Unit,
 ) {
     val alcance = rememberCoroutineScope()
@@ -58,7 +60,7 @@ fun PruebaHumana(
         cargandoReto = true
         alcance.launch {
             try {
-                reto = Repositorio.crearReto()
+                reto = Repositorio.crearReto(correo, sesion)
                 marca = TimeSource.Monotonic.markNow()
             } catch (t: Throwable) {
                 errorLocal = mensajeDeError(t)
@@ -68,7 +70,7 @@ fun PruebaHumana(
         }
     }
 
-    LaunchedEffect(Unit) { pedirReto() }
+    LaunchedEffect(correo, sesion) { pedirReto() }
 
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
@@ -138,7 +140,12 @@ fun PruebaHumana(
                         alcance.launch {
                             try {
                                 val duracion = marca.elapsedNow().inWholeMilliseconds.toInt()
-                                val token = Repositorio.verificarReto(actual.id, elegida, duracion)
+                                val token = Repositorio.verificarReto(
+                                    actual.id,
+                                    elegida,
+                                    duracion,
+                                    sesion,
+                                )
                                 onVerificado(token.token)
                             } catch (t: Throwable) {
                                 errorLocal = mensajeDeError(t)

@@ -13,12 +13,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -31,11 +34,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.mundocreativo.barronegro.EstadoApp
 import org.mundocreativo.barronegro.Formato
 import org.mundocreativo.barronegro.MesCalendario
+import org.mundocreativo.barronegro.data.Contacto
 import org.mundocreativo.barronegro.data.FranjaDisponible
 import org.mundocreativo.barronegro.fechaHoyIso
 import org.mundocreativo.barronegro.iso
@@ -52,9 +57,10 @@ fun PantallaCalendario(estado: EstadoApp) {
 
     val mes = estado.mesCalendario
     val porFecha = estado.franjas.groupBy { it.fecha }
-    val misDias = estado.reservas
-        .filter { it.estado == "pendiente" || it.estado == "aprobada" }
-        .map { it.fecha }
+    val misDias = (estado.reservas.map { it.fecha to it.estado } +
+            estado.reservasAnonimas.map { it.fecha to it.estado })
+        .filter { it.second == "pendiente" || it.second == "aprobada" }
+        .map { it.first }
         .toSet()
 
     // Al abrir el mes (o al cambiar de mes) se preselecciona el primer día con cupo.
@@ -75,6 +81,19 @@ fun PantallaCalendario(estado: EstadoApp) {
     ) {
         if (!estado.calendarioAbierto) {
             Aviso("El administrador ha cerrado el calendario del taller por ahora.")
+        }
+
+        if (!estado.conectado) {
+            Text(
+                "Puedes reservar sin crear una cuenta. Solo necesitamos tu correo y teléfono " +
+                        "para confirmarte y avisarte si el taller cancela la cita.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "Este navegador guarda una cookie técnica para reconocer tus reservas. " +
+                        "No crea una cuenta ni se usa para publicidad.",
+                style = MaterialTheme.typography.labelSmall,
+            )
         }
 
         Card(Modifier.fillMaxWidth()) {
@@ -119,12 +138,12 @@ fun PantallaCalendario(estado: EstadoApp) {
             }
         }
 
-        if (estado.bloqueos.isNotEmpty()) {
+        if (estado.conectado && estado.bloqueos.isNotEmpty()) {
             Text("Bloqueos del calendario", style = MaterialTheme.typography.titleSmall)
             estado.bloqueos.forEach { bloqueo ->
                 Text(
                     "• ${Formato.momentoCorto(bloqueo.desde)} → ${Formato.momentoCorto(bloqueo.hasta)}" +
-                        (bloqueo.motivo?.let { " · $it" } ?: ""),
+                            (bloqueo.motivo?.let { " · $it" } ?: ""),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -132,9 +151,14 @@ fun PantallaCalendario(estado: EstadoApp) {
     }
 
     franjaElegida?.let { franja ->
-        DialogoReserva(estado, franja) { franjaElegida = null }
+        if (estado.conectado) {
+            DialogoReserva(estado, franja) { franjaElegida = null }
+        } else {
+            DialogoReservaAnonima(estado, franja) { franjaElegida = null }
+        }
     }
 }
+
 @Composable
 private fun CabeceraMes(mes: MesCalendario, alCambiar: (Int) -> Unit) {
     val puedeRetroceder = !mes.sumar(-1).anteriorA(MesCalendario.actual())
@@ -346,7 +370,7 @@ private fun DialogoReserva(
                 )
                 Text(
                     "${Formato.hora(franja.horaInicio)} – " +
-                        Formato.sumarMinutos(franja.horaInicio, duracion),
+                            Formato.sumarMinutos(franja.horaInicio, duracion),
                     style = MaterialTheme.typography.titleSmall,
                 )
                 if (franja.cuposLibres > 1) {
@@ -376,6 +400,181 @@ private fun DialogoReserva(
             }
         },
         confirmButton = { TextButton(onClick = alCerrar) { Text("Cancelar") } },
+    )
+}
+
+
+/**
+ * Reserva sin cuenta. Primero se piden los datos de contacto y después se resuelve el reto
+ * humano. El correo queda fijado antes del reto: el token emitido por Postgres está atado
+ * al hash de ese correo y a la sesión de la cookie.
+ */
+@Composable
+private fun DialogoReservaAnonima(
+    estado: EstadoApp,
+    franja: FranjaDisponible,
+    alCerrar: () -> Unit,
+) {
+    val pasoDuracion = estado.sala?.duracionTurnoMin ?: 60
+    val maximo = estado.sala?.duracionMaximaMin ?: 120
+    val automatica = estado.sala?.aprobacionAutomatica != false
+    val opciones = remember(franja, pasoDuracion, maximo) { franja.duraciones(pasoDuracion, maximo) }
+    var duracion by remember(franja) { mutableStateOf(opciones.firstOrNull() ?: pasoDuracion) }
+    var paso by remember(franja) { mutableStateOf(1) }
+
+    val anterior = estado.reservasAnonimas.firstOrNull()
+    var nombre by remember(franja, anterior?.reservaId) {
+        mutableStateOf(anterior?.nombreContacto.orEmpty())
+    }
+    var correo by remember(franja, anterior?.reservaId) {
+        mutableStateOf(anterior?.correoContacto.orEmpty())
+    }
+    var telefono by remember(franja, anterior?.reservaId) {
+        mutableStateOf(anterior?.telefonoContacto.orEmpty())
+    }
+    var comentario by remember(franja) { mutableStateOf("") }
+
+    val correoOk = Contacto.correoValido(correo)
+    val telefonoOk = Contacto.telefonoValido(telefono)
+    val puedeContinuar = correoOk && telefonoOk && !estado.trabajando
+
+    AlertDialog(
+        onDismissRequest = alCerrar,
+        title = {
+            Text(
+                when {
+                    paso == 1 -> if (automatica) "Reserva sin cuenta" else "Solicitar reserva"
+                    else -> "Verifica que eres humano"
+                },
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    Formato.fechaLarga(franja.fecha),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "${Formato.hora(franja.horaInicio)} – " +
+                            Formato.sumarMinutos(franja.horaInicio, duracion),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+
+                if (opciones.size > 1) {
+                    Text("Duración", style = MaterialTheme.typography.labelSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        opciones.forEach { opcion ->
+                            FilterChip(
+                                selected = opcion == duracion,
+                                onClick = { duracion = opcion },
+                                label = { Text(Formato.duracion(opcion)) },
+                            )
+                        }
+                    }
+                }
+
+                if (paso == 1) {
+                    OutlinedTextField(
+                        value = nombre,
+                        onValueChange = { nombre = it },
+                        label = { Text("Nombre (opcional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = correo,
+                        onValueChange = { correo = it },
+                        label = { Text("Correo") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        isError = correo.isNotBlank() && !correoOk,
+                        supportingText = {
+                            if (correo.isNotBlank() && !correoOk) {
+                                Text("Escribe un correo válido")
+                            } else {
+                                Text("Aquí enviaremos la confirmación.")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = telefono,
+                        onValueChange = { telefono = it },
+                        label = { Text("Teléfono") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        isError = telefono.isNotBlank() && !telefonoOk,
+                        supportingText = {
+                            if (telefono.isNotBlank() && !telefonoOk) {
+                                Text("Escribe entre 7 y 20 dígitos")
+                            } else {
+                                Text("El taller lo usará solo para esta reserva.")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = comentario,
+                        onValueChange = { comentario = it },
+                        label = { Text("Comentario (opcional)") },
+                        singleLine = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "Usamos una cookie técnica para reconocer este navegador y mostrarte " +
+                                "tus reservas. No crea una cuenta.",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Button(
+                        onClick = { paso = 2 },
+                        enabled = puedeContinuar,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Continuar")
+                    }
+                } else {
+                    Text(
+                        "Nombre: " + nombre.ifBlank { "Sin nombre" },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text("Correo: $correo", style = MaterialTheme.typography.bodySmall)
+                    Text("Teléfono: $telefono", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { paso = 1 }) { Text("Cambiar datos") }
+
+                    val sesion = estado.sesionAnonima
+                    if (sesion == null) {
+                        MensajeError(
+                            "No se pudo preparar la sesión de este navegador. " +
+                                    "Recarga la página e inténtalo de nuevo.",
+                        )
+                    } else {
+                        PruebaHumana(
+                            correo = Contacto.normalizarCorreo(correo),
+                            sesion = sesion,
+                        ) { token ->
+                            estado.reservarAnonimo(
+                                franja = franja,
+                                duracionMin = duracion,
+                                nombre = nombre,
+                                correo = correo,
+                                telefono = telefono,
+                                comentario = comentario.ifBlank { null },
+                                tokenHumano = token,
+                            ) { alCerrar() }
+                        }
+                    }
+
+                    estado.error?.let { MensajeError(it) }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = alCerrar) { Text("Cancelar") }
+        },
     )
 }
 

@@ -129,6 +129,37 @@ curl -sI "$URL/storage/v1/object/public/taller-fotos/<ruta>.jpg" -H "apikey: $KE
 Buckets del proyecto: `avatares` (público), `taller-fotos` (público) y `reservas-adjuntos`
 (privado, solo dueño o admin).
 
+## Reservas anónimas y correos
+
+La `anon` key sigue sin poder leer tablas. El flujo anónimo solo ejecuta funciones concretas:
+
+```bash
+# sesión de navegador
+curl -s -X POST "$URL/rest/v1/rpc/crear_sesion_anonima" \
+  -H "apikey: $KEY" -H "Content-Type: application/json" -d '{}'
+
+# calendario público
+curl -s -X POST "$URL/rest/v1/rpc/sala_publica" \
+  -H "apikey: $KEY" -H "Content-Type: application/json" \
+  -d '{"p_sala_id":"00000000-0000-4000-8000-000000000001"}'
+
+curl -s -X POST "$URL/rest/v1/rpc/franjas_disponibles" \
+  -H "apikey: $KEY" -H "Content-Type: application/json" \
+  -d '{"p_sala_id":"00000000-0000-4000-8000-000000000001","p_desde":"2026-12-01","p_hasta":"2026-12-07"}'
+```
+
+El resto (`crear_reto_humano_anonimo`, `verificar_reto_humano_anonimo`, `reservar_franja_anonima`,
+`mis_reservas_anonimas`, `cancelar_reserva_anonima`) recibe `p_sesion`; es el valor de la cookie
+`barronegro_sesion`. Sin él no se puede leer ni cancelar una reserva anónima. Las tablas
+`reservas`, `retos_humanos`, `tokens_humanos` y `privado.correos_log` siguen denegadas para `anon`.
+
+`agenda_admin` ahora devuelve también `correo` y `origen`; en las reservas anónimas el nombre y el
+teléfono salen de los campos de contacto porque no hay fila en `perfiles`.
+
+Los correos de reserva se disparan desde Postgres con `pg_net`. La API key se guarda en Vault y la
+configuración no secreta en `privado.secretos`; revisa `privado.correos_log` y
+`net._http_response` para diagnosticar un envío. El detalle está en el README principal.
+
 ## SQL de verdad
 
 Cuando lo que hace falta es `count(*)`, un `explain` o comprobar una política RLS:
