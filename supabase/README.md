@@ -54,6 +54,57 @@ export SUPABASE_TOKEN='eyJ...'                            # caduca en ~1 h
 Rechaza arrancar si detecta una `service_role` en `SUPABASE_ANON_KEY`, y devuelve código de salida
 distinto de cero cuando el HTTP es ≥ 400.
 
+## Mantener el proyecto despierto (Raspberry Pi)
+
+El plan Free pausa un proyecto tras ~1 semana de baja actividad; según la documentación, *"a few
+user requests to the database each day over the previous week is enough"* para que no lo pause.
+`supabase/vigilante.sh` cubre eso y además avisa si el proyecto deja de responder.
+
+Cada ejecución hace dos peticiones pequeñas y solo da el proyecto por vivo si **ambas** responden
+`200`:
+
+| Petición | Qué demuestra |
+|---|---|
+| `GET /auth/v1/health` | conectividad y que la clave publicable sigue siendo válida |
+| `POST /rest/v1/rpc/sala_publica` con `SALA_ID` | lectura real en Postgres (actividad de BD, no solo Auth) |
+
+Si algo falla reintenta 3 veces (20 s entre intentos) y entonces publica **un único aviso** en
+`https://ntfy.sh/potito1111` con host, hora, endpoint, código HTTP o error de `curl`, y un enlace al
+panel para reanudar el proyecto. El estado se guarda en `~/.cache/barronegro-vigilante/estado` para
+no repetir el aviso en cada vuelta.
+
+```bash
+./supabase/vigilante.sh --simular      # comprueba y muestra el aviso sin enviarlo
+./supabase/vigilante.sh --probar-ntfy  # envía un aviso de prueba
+./supabase/vigilante.sh --forzar       # repite el aviso aunque ya constara como caído
+```
+
+En la Pi, cada 15 minutos:
+
+```bash
+chmod +x /home/pi/barronegro/supabase/vigilante.sh
+
+# crontab -e
+*/15 * * * * /home/pi/barronegro/supabase/vigilante.sh >> /home/pi/barronegro-vigilante.log 2>&1
+```
+
+Variables de entorno (todas opcionales): `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SALA_ID`,
+`COMPROBAR_RPC=0` (solo health), `NTFY_URL`, `NTFY_TOKEN` (topic privado), `NTFY_TITULO`,
+`NTFY_PRIORIDAD`, `NTFY_ETIQUETAS`, `INTENTOS`, `ESPERA`, `AVISAR_RECUPERACION=1` (avisa también al
+volver), `DIR_ESTADO`, `PANEL_URL`. Salida: `0` bien · `1` caído o aviso no enviado · `64` uso ·
+`65` configuración.
+
+Tres avisos:
+
+- **El topic de ntfy es público.** En ntfy.sh el nombre del topic *"is essentially a password"*:
+  quien lo conozca puede suscribirse. Usa un nombre aleatorio o un topic protegido con `NTFY_TOKEN`.
+- **Solo la clave publicable.** Es pública por diseño y la que usan la web y el APK; la `service_role`
+  nunca va aquí (el script la rechaza).
+- **El keep-alive reduce el riesgo, no lo elimina.** Un fallo del propio vigilante (Pi apagada, sin
+  internet) puede acabar en pausa, y solo el plan Pro garantiza que no se pause. Si la Pi se queda
+  sin red, el aviso lo delata con el error de `curl`: `Could not resolve host`,
+  `Connection timed out`, `Operation timed out`.
+
 ## Recetas con curl
 
 ### 1. ¿Está viva la base? (sin credenciales de usuario)

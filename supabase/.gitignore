@@ -6,3 +6,6 @@
 .env.keys
 .env.local
 .env.*.local
+
+# vigilante local: contiene URL, clave publicable y topic de ntfy
+/vigilante.sh
