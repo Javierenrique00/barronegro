@@ -164,6 +164,20 @@ El registro crea usuarios con rol `usuario`. Para habilitar el panel de administ
 `supabase/promover_admin.sql`. Con al menos un administrador activo, los demás roles se cambian
 desde la función `cambiar_rol_usuario(...)`.
 
+## Consultar la base de datos
+
+`curl` llega a la API HTTP de Supabase (PostgREST, Auth y Storage), pero **no** ejecuta SQL libre y
+la clave `anon` no tiene `SELECT` sobre ninguna tabla: hace falta un JWT de usuario. Para probarlo
+todo sin recordar las URLs:
+
+```bash
+./supabase/consultar.sh salud      # Auth + Storage + ajustes (sin usuario)
+./supabase/consultar.sh sql        # qué usar cuando de verdad hace falta SQL
+```
+
+Recetas completas, errores esperados y avisos de seguridad en
+[`supabase/README.md`](supabase/README.md).
+
 ## Correo (confirmación de cuenta y recuperación)
 
 Supabase Auth envía sus propios correos: confirmación de registro, recuperación de contraseña,
