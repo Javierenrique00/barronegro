@@ -4,10 +4,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import org.mundocreativo.barronegro.data.Bloqueo
 import org.mundocreativo.barronegro.data.Horario
 import org.mundocreativo.barronegro.data.Perfil
+import org.mundocreativo.barronegro.data.PreferenciasApp
 import org.mundocreativo.barronegro.data.Repositorio
 import org.mundocreativo.barronegro.data.Reserva
 
@@ -45,8 +48,15 @@ class EstadoApp(private val alcance: CoroutineScope) {
         alcance.launch {
             try {
                 Repositorio.inicializar()
+                // La sesión de Supabase se restaura desde SharedPreferences. Si ya no existe (por
+                // ejemplo tras un cierre de sesión en otro dispositivo) se intenta el inicio
+                // automático con las credenciales guardadas.
+                if (Repositorio.idUsuarioActual() == null) entrarConCredencialesGuardadas()
                 conectado = Repositorio.idUsuarioActual() != null
-                if (conectado) recargarInterno()
+                if (conectado) {
+                    sembrarPerfilRecordado()
+                    recargarInterno()
+                }
             } catch (t: Throwable) {
                 error = mensajeDeError(t)
             } finally {
@@ -55,6 +65,33 @@ class EstadoApp(private val alcance: CoroutineScope) {
             }
         }
         alcance.launch { observarSesion() }
+    }
+
+    /**
+     * Inicio automático con las credenciales guardadas en las preferencias (solo Android). Si falla
+     * —contraseña cambiada, sin red, cuenta bloqueada— se borra la contraseña para no reintentar en
+     * cada arranque; el correo queda precargado en la pantalla de acceso.
+     */
+    private suspend fun entrarConCredencialesGuardadas() {
+        val correo = PreferenciasApp.correoRecordado() ?: return
+        val contrasena = PreferenciasApp.contrasenaRecordada() ?: return
+        try {
+            Repositorio.entrar(correo, contrasena)
+        } catch (_: Throwable) {
+            // Si la corrutina se canceló, la excepción debe seguir su curso.
+            currentCoroutineContext().ensureActive()
+            PreferenciasApp.olvidarContrasena()
+        }
+    }
+
+    /**
+     * Muestra de inmediato el nombre y el rol guardados para que la pestaña de administración
+     * aparezca antes de que responda la red (y aunque la red falle).
+     */
+    private fun sembrarPerfilRecordado() {
+        val id = Repositorio.idUsuarioActual() ?: return
+        val guardado = PreferenciasApp.perfilRecordado() ?: return
+        perfil = Perfil(id = id, nombreCompleto = guardado.nombre, rol = guardado.rol)
     }
 
     /**
@@ -80,10 +117,15 @@ class EstadoApp(private val alcance: CoroutineScope) {
         if (Repositorio.idUsuarioActual() == null) {
             conectado = false
             perfil = null
+            PreferenciasApp.olvidarPerfil()
             return
         }
         try {
-            perfil = Repositorio.miPerfil()
+            val perfilRemoto = Repositorio.miPerfil()
+            perfil = perfilRemoto
+            if (perfilRemoto != null) {
+                PreferenciasApp.recordarPerfil(perfilRemoto.nombreCompleto, perfilRemoto.rol)
+            }
             val hoy = fechaHoyIso()
             horarios = Repositorio.horariosDesde(hoy)
             reservas = Repositorio.misReservas()
@@ -93,12 +135,16 @@ class EstadoApp(private val alcance: CoroutineScope) {
             conectado = true
         } catch (t: Throwable) {
             error = mensajeDeError(t)
+            // La sesión guardada sigue siendo válida aunque falle la red: no devolver al formulario.
+            conectado = Repositorio.idUsuarioActual() != null
         }
     }
 
     fun entrar(correo: String, contrasena: String) = accion("Sesión iniciada") {
         Repositorio.entrar(correo.trim(), contrasena)
         conectado = Repositorio.idUsuarioActual() != null
+        // Queda guardada para el próximo arranque: el administrador no vuelve a escribirla.
+        if (conectado) PreferenciasApp.recordarCredenciales(correo.trim(), contrasena)
     }
 
     fun registrar(nombre: String, correo: String, contrasena: String) = accion(null) {
@@ -111,6 +157,9 @@ class EstadoApp(private val alcance: CoroutineScope) {
 
     fun salir() = accion("Sesión cerrada") {
         Repositorio.salir()
+        // Se conserva el correo para precargarlo, pero nunca la contraseña ni el rol.
+        PreferenciasApp.olvidarContrasena()
+        PreferenciasApp.olvidarPerfil()
         conectado = false
         perfil = null
         horarios = emptyList()

@@ -24,6 +24,11 @@ val supabase: SupabaseClient by lazy {
             // URL del navegador.
             scheme = ESQUEMA_ENLACE
             host = HOST_ENLACE
+            // La sesión (incluido el token de refresco) se guarda entre arranques en las
+            // preferencias del sistema: SharedPreferences en Android y localStorage en web.
+            autoLoadFromStorage = true
+            autoSaveToStorage = true
+            alwaysAutoRefresh = true
         }
         install(Postgrest)
         install(Storage)

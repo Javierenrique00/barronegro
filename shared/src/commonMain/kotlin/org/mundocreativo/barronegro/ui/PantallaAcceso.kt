@@ -29,12 +29,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import org.mundocreativo.barronegro.EstadoApp
+import org.mundocreativo.barronegro.data.PreferenciasApp
 
 @Composable
 fun PantallaAcceso(estado: EstadoApp) {
     var modoRegistro by remember { mutableStateOf(false) }
     var nombre by remember { mutableStateOf("") }
-    var correo by remember { mutableStateOf("") }
+    var correo by remember { mutableStateOf(PreferenciasApp.correoRecordado().orEmpty()) }
     var contrasena by remember { mutableStateOf("") }
     var verContrasena by remember { mutableStateOf(false) }
 

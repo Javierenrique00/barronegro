@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 11 y anteriores (fullBackupContent).
+    Se excluye el archivo de preferencias porque contiene la contraseña guardada del administrador.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="org.mundocreativo.barronegro_preferences.xml" />
+</full-backup-content>

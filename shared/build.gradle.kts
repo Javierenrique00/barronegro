@@ -120,6 +120,10 @@ kotlin {
             implementation(libs.supabase.postgrest)
             implementation(libs.supabase.storage)
             implementation(libs.kotlinx.serialization.json)
+
+            // SharedPreferences en Android y localStorage en web: guardan el correo recordado, el
+            // perfil y la pestaña abierta para no perder la sesión del administrador.
+            implementation(libs.multiplatform.settings.noarg)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

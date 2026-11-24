@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import org.mundocreativo.barronegro.data.PreferenciasApp
 import org.mundocreativo.barronegro.data.SupabaseConfig
 import org.mundocreativo.barronegro.ui.CajaCentrada
 import org.mundocreativo.barronegro.ui.MensajeAviso
@@ -82,7 +83,20 @@ fun App() {
 
 @Composable
 private fun ContenidoPrincipal(estado: EstadoApp) {
-    var pestana by remember { mutableStateOf(0) }
+    // Se recuerda la pestaña abierta; un administrador vuelve directamente a su panel.
+    val pestanaGuardada = remember { PreferenciasApp.pestanaRecordada() }
+    var pestana by remember {
+        mutableStateOf(pestanaGuardada ?: if (estado.esAdmin) 2 else 0)
+    }
+
+    LaunchedEffect(estado.esAdmin) {
+        when {
+            !estado.esAdmin && pestana == 2 -> pestana = 0
+            // Primera vez (o tras actualizar) sin pestaña guardada: el administrador entra en su panel.
+            estado.esAdmin && pestanaGuardada == null -> pestana = 2
+        }
+    }
+    LaunchedEffect(pestana) { PreferenciasApp.recordarPestana(pestana) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Cabecera(estado)
