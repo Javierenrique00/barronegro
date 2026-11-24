@@ -35,7 +35,7 @@ fun PantallaReservas(estado: EstadoApp) {
         if (estado.reservas.isEmpty()) {
             Text("Aún no tienes reservas.", style = MaterialTheme.typography.bodyMedium)
             Text(
-                "Solicita una franja desde la pestaña Calendario.",
+                "Reserva una franja desde la pestaña Calendario.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

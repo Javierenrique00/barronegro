@@ -36,6 +36,39 @@ object Formato {
 
     fun rangoHora(inicio: String, fin: String): String = "${hora(inicio)} – ${hora(fin)}"
 
+    /** Minutos desde la medianoche de una hora HH:MM[:SS]. */
+    fun minutos(hora: String): Int {
+        val trozos = hora.take(8).split(':')
+        val h = trozos.getOrNull(0)?.toIntOrNull() ?: return 0
+        val m = trozos.getOrNull(1)?.toIntOrNull() ?: 0
+        return h * 60 + m
+    }
+
+    /** Suma minutos a una hora HH:MM y devuelve HH:MM (sin cruzar de día). */
+    fun sumarMinutos(hora: String, cantidad: Int): String {
+        val total = ((minutos(hora) + cantidad) % (24 * 60) + 24 * 60) % (24 * 60)
+        return "${(total / 60).toString().padStart(2, '0')}:${(total % 60).toString().padStart(2, '0')}"
+    }
+
+    /** Duración legible: "30 min", "1 h", "1 h 30 min". */
+    fun duracion(minutos: Int): String = when {
+        minutos < 60 -> "$minutos min"
+        minutos % 60 == 0 -> "${minutos / 60} h"
+        else -> "${minutos / 60} h ${minutos % 60} min"
+    }
+
+    /** "Noviembre" a partir del número de mes (1 = enero). */
+    fun nombreMes(mes: Int): String =
+        meses[(mes - 1).coerceIn(0, 11)].replaceFirstChar { it.uppercase() }
+
+    /** "Lunes" a partir de 1 = lunes … 7 = domingo. */
+    fun nombreDiaSemana(indice: Int): String =
+        dias[(indice - 1).coerceIn(0, 6)].replaceFirstChar { it.uppercase() }
+
+    /** Inicial del día para la cabecera de la rejilla. */
+    fun inicialDiaSemana(indice: Int): String =
+        listOf("L", "M", "X", "J", "V", "S", "D")[(indice - 1).coerceIn(0, 6)]
+
     fun momentoCorto(iso: String): String {
         val fecha = iso.substringBefore('T')
         val hora = iso.substringAfter('T', "").take(5)
@@ -46,7 +79,7 @@ object Formato {
 
     fun etiquetaEstado(estado: String): String = when (estado) {
         "pendiente" -> "Pendiente"
-        "aprobada" -> "Aprobada"
+        "aprobada" -> "Confirmada"
         "reprogramada" -> "Nueva propuesta"
         "rechazada" -> "Rechazada"
         "cancelada" -> "Cancelada"

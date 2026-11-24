@@ -2,6 +2,7 @@ package org.mundocreativo.barronegro.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import org.mundocreativo.barronegro.Formato
 
 @Serializable
 data class Sala(
@@ -9,7 +10,15 @@ data class Sala(
     val nombre: String,
     val descripcion: String? = null,
     @SerialName("zona_horaria") val zonaHoraria: String = "America/Bogota",
+    @SerialName("capacidad_por_turno") val capacidadPorTurno: Int = 1,
     @SerialName("calendario_abierto") val calendarioAbierto: Boolean = true,
+    @SerialName("duracion_turno_min") val duracionTurnoMin: Int = 60,
+    @SerialName("duracion_maxima_min") val duracionMaximaMin: Int = 120,
+    @SerialName("buffer_min") val bufferMin: Int = 0,
+    @SerialName("antelacion_min_horas") val antelacionMinHoras: Int = 0,
+    @SerialName("dias_max_antelacion") val diasMaxAntelacion: Int = 60,
+    @SerialName("aprobacion_automatica") val aprobacionAutomatica: Boolean = true,
+    @SerialName("max_reservas_por_dia") val maxReservasPorDia: Int = 1,
     val activa: Boolean = true,
 )
 
@@ -66,6 +75,57 @@ data class Bloqueo(
     val desde: String,
     val hasta: String,
     val motivo: String? = null,
+)
+
+/** Franja libre calculada en Postgres por `franjas_disponibles(...)`. */
+@Serializable
+data class FranjaDisponible(
+    val fecha: String,
+    @SerialName("hora_inicio") val horaInicio: String,
+    @SerialName("hora_fin") val horaFin: String,
+    /** Última hora a la que puede terminar la reserva dentro de la ventana del día. */
+    @SerialName("hora_fin_maxima") val horaFinMaxima: String,
+    @SerialName("cupos_libres") val cuposLibres: Int = 1,
+) {
+    /**
+     * Duraciones que puede elegir la persona: múltiplos del turno, sin pasar del
+     * máximo de la sala ni del cierre de la ventana de ese día.
+     */
+    fun duraciones(paso: Int, maximo: Int): List<Int> {
+        if (paso <= 0) return listOf(maximo)
+        val disponible = Formato.minutos(horaFinMaxima) - Formato.minutos(horaInicio)
+        if (disponible <= 0) return listOf(paso)
+        val tope = minOf(maximo, disponible)
+        val opciones = mutableListOf<Int>()
+        var actual = paso
+        while (actual <= tope) {
+            opciones += actual
+            actual += paso
+        }
+        return opciones.ifEmpty { listOf(minOf(paso, disponible)) }
+    }
+}
+
+/** Ventana de apertura de un día de la semana (1 = lunes … 7 = domingo). */
+@Serializable
+data class ReglaDisponibilidad(
+    @SerialName("dia_semana") val diaSemana: Int,
+    @SerialName("hora_inicio") val horaInicio: String,
+    @SerialName("hora_fin") val horaFin: String,
+)
+
+/** Fila de `agenda_admin(...)`: reserva próxima con los datos de la persona. */
+@Serializable
+data class FilaAgenda(
+    @SerialName("reserva_id") val reservaId: String,
+    val fecha: String,
+    @SerialName("hora_inicio") val horaInicio: String,
+    @SerialName("hora_fin") val horaFin: String,
+    val estado: String,
+    @SerialName("usuario_id") val usuarioId: String,
+    val nombre: String = "",
+    val telefono: String? = null,
+    val comentario: String? = null,
 )
 
 @Serializable

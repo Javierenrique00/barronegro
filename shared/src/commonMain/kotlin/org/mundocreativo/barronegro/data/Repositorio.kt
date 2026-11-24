@@ -119,6 +119,27 @@ object Repositorio {
         }
         .decodeList()
 
+    /** Franjas libres del rango. La disponibilidad se calcula en Postgres. */
+    suspend fun franjasDisponibles(desde: String, hasta: String): List<FranjaDisponible> =
+        supabase.postgrest.rpc(
+            "franjas_disponibles",
+            buildJsonObject {
+                put("p_sala_id", SALA)
+                put("p_desde", desde)
+                put("p_hasta", hasta)
+            },
+        ).decodeList()
+
+    /** Plantilla semanal publicada por el administrador. */
+    suspend fun reglasDisponibilidad(): List<ReglaDisponibilidad> =
+        supabase.postgrest.from("disponibilidad_reglas")
+            .select {
+                filter { eq("sala_id", SALA) }
+                order("dia_semana", Order.ASCENDING)
+                order("hora_inicio", Order.ASCENDING)
+            }
+            .decodeList()
+
     // --- Verificación humana ------------------------------------------------
 
     suspend fun crearReto(): RetoHumano =
@@ -136,6 +157,30 @@ object Repositorio {
 
     // --- Reservas -----------------------------------------------------------
 
+    /**
+     * Reserva directa de una franja libre. Postgres vuelve a validar reglas, cupos,
+     * bloqueos y el token humano antes de insertar; si la sala tiene aprobación
+     * automática la reserva queda confirmada al instante.
+     */
+    suspend fun reservarFranja(
+        fecha: String,
+        horaInicio: String,
+        duracionMin: Int,
+        comentario: String?,
+        tokenHumano: String,
+    ): String = supabase.postgrest.rpc(
+        "reservar_franja",
+        buildJsonObject {
+            put("p_sala_id", SALA)
+            put("p_fecha", fecha)
+            put("p_hora_inicio", horaInicio)
+            put("p_duracion_min", duracionMin)
+            put("p_comentario", comentario)
+            put("p_token_humano", tokenHumano)
+        },
+    ).decodeAs()
+
+    /** Flujo anterior sobre franjas creadas a mano. Se conserva por compatibilidad. */
     suspend fun solicitarReserva(horarioId: String, comentario: String?, tokenHumano: String): String =
         supabase.postgrest.rpc(
             "solicitar_reserva",
@@ -245,4 +290,58 @@ object Repositorio {
             },
         )
     }
+
+    /** Reemplaza la plantilla semanal completa. Solo un administrador puede hacerlo. */
+    suspend fun guardarDisponibilidad(reglas: List<ReglaDisponibilidad>) {
+        supabase.postgrest.rpc(
+            "guardar_disponibilidad",
+            buildJsonObject {
+                put("p_sala_id", SALA)
+                putJsonArray("p_reglas") {
+                    reglas.forEach { regla ->
+                        add(
+                            buildJsonObject {
+                                put("dia_semana", regla.diaSemana)
+                                put("hora_inicio", regla.horaInicio)
+                                put("hora_fin", regla.horaFin)
+                            },
+                        )
+                    }
+                }
+            },
+        )
+    }
+
+    suspend fun actualizarPoliticaSala(
+        duracionTurnoMin: Int,
+        duracionMaximaMin: Int,
+        bufferMin: Int,
+        antelacionMinHoras: Int,
+        diasMaxAntelacion: Int,
+        capacidadPorTurno: Int,
+        aprobacionAutomatica: Boolean,
+        maxReservasPorDia: Int,
+    ) {
+        supabase.postgrest.rpc(
+            "actualizar_politica_sala",
+            buildJsonObject {
+                put("p_sala_id", SALA)
+                put("p_duracion_turno_min", duracionTurnoMin)
+                put("p_duracion_maxima_min", duracionMaximaMin)
+                put("p_buffer_min", bufferMin)
+                put("p_antelacion_min_horas", antelacionMinHoras)
+                put("p_dias_max_antelacion", diasMaxAntelacion)
+                put("p_capacidad_por_turno", capacidadPorTurno)
+                put("p_aprobacion_automatica", aprobacionAutomatica)
+                put("p_max_reservas_por_dia", maxReservasPorDia)
+            },
+        )
+    }
+
+    /** Reservas próximas con el nombre y el teléfono de cada persona (solo administradores). */
+    suspend fun agendaAdmin(dias: Int = 60): List<FilaAgenda> =
+        supabase.postgrest.rpc(
+            "agenda_admin",
+            buildJsonObject { put("p_dias", dias) },
+        ).decodeList()
 }

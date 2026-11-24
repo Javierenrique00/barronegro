@@ -8,11 +8,15 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import org.mundocreativo.barronegro.data.Bloqueo
+import org.mundocreativo.barronegro.data.FilaAgenda
+import org.mundocreativo.barronegro.data.FranjaDisponible
 import org.mundocreativo.barronegro.data.Horario
 import org.mundocreativo.barronegro.data.Perfil
 import org.mundocreativo.barronegro.data.PreferenciasApp
+import org.mundocreativo.barronegro.data.ReglaDisponibilidad
 import org.mundocreativo.barronegro.data.Repositorio
 import org.mundocreativo.barronegro.data.Reserva
+import org.mundocreativo.barronegro.data.Sala
 
 /** Estado compartido de la aplicación (web y Android usan exactamente el mismo). */
 class EstadoApp(private val alcance: CoroutineScope) {
@@ -34,6 +38,26 @@ class EstadoApp(private val alcance: CoroutineScope) {
     var bloqueos by mutableStateOf<List<Bloqueo>>(emptyList())
         private set
     var calendarioAbierto by mutableStateOf(true)
+        private set
+
+    /** Sala con la política de reservas: duración, buffer, aprobación automática… */
+    var sala by mutableStateOf<Sala?>(null)
+        private set
+
+    /** Franjas libres del mes visible, calculadas en Postgres. */
+    var franjas by mutableStateOf<List<FranjaDisponible>>(emptyList())
+        private set
+
+    /** Plantilla semanal publicada (solo la usa el panel del administrador). */
+    var reglas by mutableStateOf<List<ReglaDisponibilidad>>(emptyList())
+        private set
+
+    /** Reservas próximas con el nombre de cada persona (solo administradores). */
+    var agenda by mutableStateOf<List<FilaAgenda>>(emptyList())
+        private set
+
+    /** Mes que muestra el calendario. */
+    var mesCalendario by mutableStateOf(MesCalendario.actual())
         private set
 
     var error by mutableStateOf<String?>(null)
@@ -127,11 +151,25 @@ class EstadoApp(private val alcance: CoroutineScope) {
                 PreferenciasApp.recordarPerfil(perfilRemoto.nombreCompleto, perfilRemoto.rol)
             }
             val hoy = fechaHoyIso()
+            val salaRemota = Repositorio.sala()
+            sala = salaRemota
+            calendarioAbierto = salaRemota?.calendarioAbierto ?: true
             horarios = Repositorio.horariosDesde(hoy)
+            franjas = Repositorio.franjasDisponibles(
+                mesCalendario.primerDiaIso(),
+                mesCalendario.ultimoDiaIso(),
+            )
             reservas = Repositorio.misReservas()
             bloqueos = Repositorio.bloqueos()
-            calendarioAbierto = Repositorio.sala()?.calendarioAbierto ?: true
-            pendientes = if (perfil?.esAdmin == true) Repositorio.reservasPorResolver() else emptyList()
+            if (perfil?.esAdmin == true) {
+                pendientes = Repositorio.reservasPorResolver()
+                reglas = Repositorio.reglasDisponibilidad()
+                agenda = Repositorio.agendaAdmin()
+            } else {
+                pendientes = emptyList()
+                reglas = emptyList()
+                agenda = emptyList()
+            }
             conectado = true
         } catch (t: Throwable) {
             error = mensajeDeError(t)
@@ -166,6 +204,11 @@ class EstadoApp(private val alcance: CoroutineScope) {
         reservas = emptyList()
         pendientes = emptyList()
         bloqueos = emptyList()
+        sala = null
+        franjas = emptyList()
+        reglas = emptyList()
+        agenda = emptyList()
+        mesCalendario = MesCalendario.actual()
     }
 
     fun recuperarContrasena(correo: String) =
@@ -183,6 +226,48 @@ class EstadoApp(private val alcance: CoroutineScope) {
             alTerminar()
         }
 
+    /**
+     * Reserva directa de una franja del calendario. Postgres decide si queda confirmada
+     * al instante (aprobación automática) o pendiente, y vuelve a validar todo.
+     */
+    fun reservar(
+        franja: FranjaDisponible,
+        duracionMin: Int,
+        comentario: String?,
+        tokenHumano: String,
+        alTerminar: () -> Unit,
+    ) = accion(
+        if (sala?.aprobacionAutomatica != false) "Reserva confirmada"
+        else "Solicitud enviada. El administrador la revisará.",
+    ) {
+        Repositorio.reservarFranja(
+            fecha = franja.fecha,
+            horaInicio = franja.horaInicio,
+            duracionMin = duracionMin,
+            comentario = comentario?.ifBlank { null },
+            tokenHumano = tokenHumano,
+        )
+        alTerminar()
+    }
+
+    /** Cambia el mes del calendario y recarga solo las franjas de ese mes. */
+    fun cambiarMes(meses: Int) {
+        val destino = mesCalendario.sumar(meses)
+        if (destino.anteriorA(MesCalendario.actual())) return
+        mesCalendario = destino
+        alcance.launch {
+            trabajando = true
+            try {
+                franjas = Repositorio.franjasDisponibles(destino.primerDiaIso(), destino.ultimoDiaIso())
+                error = null
+            } catch (t: Throwable) {
+                error = mensajeDeError(t)
+            } finally {
+                trabajando = false
+            }
+        }
+    }
+
     fun cancelarReserva(id: String) = accion("Reserva cancelada") {
         Repositorio.cancelarReserva(id)
     }
@@ -196,6 +281,34 @@ class EstadoApp(private val alcance: CoroutineScope) {
         accion("Horarios creados") {
             Repositorio.crearHorarios(fechas, inicio, fin, capacidad)
         }
+
+    /** Publica la plantilla semanal completa (reemplaza la anterior). */
+    fun guardarDisponibilidad(nuevas: List<ReglaDisponibilidad>) =
+        accion("Horario semanal guardado") {
+            Repositorio.guardarDisponibilidad(nuevas)
+        }
+
+    fun guardarPolitica(
+        duracionTurnoMin: Int,
+        duracionMaximaMin: Int,
+        bufferMin: Int,
+        antelacionMinHoras: Int,
+        diasMaxAntelacion: Int,
+        capacidadPorTurno: Int,
+        aprobacionAutomatica: Boolean,
+        maxReservasPorDia: Int,
+    ) = accion("Política de reservas actualizada") {
+        Repositorio.actualizarPoliticaSala(
+            duracionTurnoMin = duracionTurnoMin,
+            duracionMaximaMin = duracionMaximaMin,
+            bufferMin = bufferMin,
+            antelacionMinHoras = antelacionMinHoras,
+            diasMaxAntelacion = diasMaxAntelacion,
+            capacidadPorTurno = capacidadPorTurno,
+            aprobacionAutomatica = aprobacionAutomatica,
+            maxReservasPorDia = maxReservasPorDia,
+        )
+    }
 
     fun aprobarReserva(id: String) = accion("Reserva aprobada") {
         Repositorio.aprobarReserva(id)

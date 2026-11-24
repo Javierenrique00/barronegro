@@ -124,3 +124,21 @@ fun CampoTextoAmplio(
         modifier = Modifier.fillMaxWidth().heightIn(min = altoMinimo),
     )
 }
+
+/** Campo corto sin etiqueta fija, para filas compactas como las horas del horario semanal. */
+@Composable
+fun CampoHora(
+    valor: String,
+    alCambiar: (String) -> Unit,
+    pista: String,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = valor,
+        onValueChange = alCambiar,
+        placeholder = { Text(pista, style = MaterialTheme.typography.bodySmall) },
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodySmall,
+        modifier = modifier,
+    )
+}

@@ -26,10 +26,11 @@ ni saltarse reglas modificando el código.
 
 | Tabla | Contenido |
 |---|---|
-| `salas` | La sala reservable. Semilla: `Taller de cerámica` (`America/Bogota`). |
+| `salas` | La sala reservable y su **política de reservas**: duración del turno, duración máxima, buffer, antelación mínima, días a la vista, cupos, aprobación automática y reservas por persona y día. Semilla: `Taller de cerámica` (`America/Bogota`). |
 | `perfiles` | 1:1 con `auth.users`. `rol` (`admin`/`usuario`) y `estado` (`activo`/`bloqueado`). |
-| `horarios` | Franjas que crea el administrador: `fecha`, `hora_inicio`, `hora_fin`, `capacidad`, `estado`. |
-| `reservas` | Solicitudes: `pendiente → aprobada | rechazada | reprogramada → aprobada/cancelada`. |
+| `disponibilidad_reglas` | **Plantilla semanal**: una ventana `hora_inicio`–`hora_fin` por día de la semana (1 = lunes … 7 = domingo). De aquí salen todas las franjas de todos los días. |
+| `horarios` | Franjas puntuales creadas a mano, para fechas u horas fuera de la plantilla. Opcional. |
+| `reservas` | Reservas: `pendiente`/`aprobada` (confirmada) → `reprogramada` → `cancelada`/`rechazada`/`expirada`. `horario_id` puede ser `null` cuando la reserva sale de la plantilla. |
 | `reserva_eventos` | Bitácora de cada transición (auditoría). |
 | `bloqueos_sala` | Rangos en los que el administrador cierra el calendario. |
 | `adjuntos` | Metadatos de fotos subidas al bucket privado. |
@@ -45,6 +46,32 @@ Migraciones aplicadas (también versionadas en `supabase/migrations/`):
 6. `storage_buckets_y_politicas`
 7. `endurecer_funciones`
 8. `borrado_de_usuarios`
+9. `disponibilidad_calendly`
+10. `hoy_en_zona_sala`
+
+## Reservas tipo Calendly
+
+El administrador publica **una sola vez** el horario de cada día de la semana y el sistema genera las
+franjas de todos los días. El usuario elige día → hora → confirma, y la reserva queda **confirmada al
+instante** (salvo que el administrador desactive la aprobación automática).
+
+- `disponibilidad_reglas` guarda la plantilla semanal; `guardar_disponibilidad(uuid, jsonb)` la
+  reemplaza de forma atómica y valida que no haya dos ventanas solapadas el mismo día.
+- `franjas_disponibles(sala, desde, hasta)` devuelve solo lo que se puede reservar: aplica día de la
+  semana, duración del turno, cupos, buffer entre reservas, bloqueos, antelación mínima y horizonte.
+  El cliente **no calcula disponibilidad**, solo pinta lo que recibe (con `hora_fin_maxima` para
+  ofrecer duraciones válidas).
+- `reservar_franja(...)` valida otra vez todo en Postgres: rejilla horaria, cupos, bloqueos, límite
+  diario, token humano de un solo uso y, con `pg_advisory_xact_lock` por sala, evita que dos personas
+  se queden con la misma franja a la vez.
+- `actualizar_politica_sala(...)` cambia duración, buffer, antelación, horizonte, cupos, aprobación
+  automática y reservas por día desde el panel del administrador.
+- `agenda_admin(dias)` devuelve las reservas próximas con nombre y teléfono, para el panel.
+- Las franjas de `horarios` creadas a mano siguen apareciendo en el calendario y son reservables;
+  se deduplican con las de la plantilla.
+
+> El flujo anterior (`crear_horarios` + `solicitar_reserva`) se conserva por compatibilidad, pero la
+> pestaña Calendario ya usa la disponibilidad semanal.
 
 ## Verificación humana (opción implementada)
 
@@ -229,3 +256,8 @@ capturan en Mailpit y no hay límite por hora.
   autenticación, así que requieren un proveedor propio invocado desde una Edge Function o un
   trigger de Postgres.
 - Realtime para que el panel del administrador se actualice sin pulsar "Actualizar".
+- **Sincronización con Google Calendar (fase 2).** Queda preparada pero no implementada: al crear,
+  reprogramar o cancelar una reserva habrá que escribir el evento en el calendario del taller. La
+  vía prevista es una Edge Function con cuenta de servicio de Google (se comparte el calendario con
+  su correo, sin OAuth) más una cola `google_cola` alimentada por un trigger; `reservas.horario_id`
+  ya es opcional y las reglas viven en Postgres, así que la fase 2 solo añade columnas y la función.

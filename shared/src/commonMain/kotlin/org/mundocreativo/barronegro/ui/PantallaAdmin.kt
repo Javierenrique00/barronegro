@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -17,6 +18,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +29,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.mundocreativo.barronegro.EstadoApp
 import org.mundocreativo.barronegro.Formato
+import org.mundocreativo.barronegro.data.FilaAgenda
+import org.mundocreativo.barronegro.data.ReglaDisponibilidad
 import org.mundocreativo.barronegro.data.Reserva
 import org.mundocreativo.barronegro.data.SupabaseConfig
 
@@ -73,12 +77,20 @@ fun PantallaAdmin(estado: EstadoApp) {
             }
         }
 
+        HorarioSemanal(estado)
+        PoliticaReservas(estado)
+
         Card(Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Crear franjas disponibles", fontWeight = FontWeight.SemiBold)
+                Text("Franjas puntuales (opcional)", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "El horario semanal ya genera las franjas de todos los días. Usa esto solo para " +
+                        "publicar una fecha fuera de ese horario.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 CampoTextoAmplio(
                     valor = fechas,
                     alCambiar = { fechas = it },
@@ -184,6 +196,15 @@ fun PantallaAdmin(estado: EstadoApp) {
                 }
             }
         }
+
+        Text("Agenda de los próximos 60 días", style = MaterialTheme.typography.titleSmall)
+        val agendaActiva = estado.agenda.filter {
+            it.estado == "pendiente" || it.estado == "aprobada" || it.estado == "reprogramada"
+        }
+        if (agendaActiva.isEmpty()) {
+            Text("Todavía no hay reservas próximas.", style = MaterialTheme.typography.bodySmall)
+        }
+        agendaActiva.forEach { fila -> TarjetaAgenda(estado, fila) }
     }
 
     rechazando?.let { reserva ->
@@ -275,3 +296,253 @@ private fun DialogoPropuesta(
         dismissButton = { TextButton(onClick = alCerrar) { Text("Cancelar") } },
     )
 }
+private data class DiaHorario(
+    val dia: Int,
+    val activo: Boolean,
+    val inicio: String,
+    val fin: String,
+)
+
+/** Editor de la plantilla semanal: una fila por día, guardada en una sola llamada. */
+@Composable
+private fun HorarioSemanal(estado: EstadoApp) {
+    var filas by remember { mutableStateOf<List<DiaHorario>>(emptyList()) }
+    var sembrado by remember { mutableStateOf(false) }
+    val firma = estado.reglas.joinToString(";") {
+        "${it.diaSemana}:${it.horaInicio.take(5)}-${it.horaFin.take(5)}"
+    }
+
+    // Se siembra con lo publicado; la primera vez, si aún no hay nada, se propone
+    // lunes a viernes de 09:00 a 18:00 (sin guardar hasta que el administrador acepte).
+    LaunchedEffect(firma) {
+        val primeraVez = !sembrado
+        filas = (1..7).map { dia ->
+            val regla = estado.reglas.firstOrNull { it.diaSemana == dia }
+            DiaHorario(
+                dia = dia,
+                activo = regla != null || (primeraVez && dia <= 5),
+                inicio = regla?.horaInicio?.take(5) ?: "09:00",
+                fin = regla?.horaFin?.take(5) ?: "18:00",
+            )
+        }
+        sembrado = true
+    }
+
+    fun actualizar(dia: Int, cambio: (DiaHorario) -> DiaHorario) {
+        filas = filas.map { if (it.dia == dia) cambio(it) else it }
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Horario semanal", fontWeight = FontWeight.SemiBold)
+            Text(
+                "Con estas horas se generan las franjas de todos los días; los usuarios reservan " +
+                    "directamente sobre ellas. Formato HH:MM.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            filas.forEach { fila ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Switch(
+                        checked = fila.activo,
+                        onCheckedChange = { activo ->
+                            actualizar(fila.dia) { it.copy(activo = activo) }
+                        },
+                    )
+                    Text(
+                        Formato.nombreDiaSemana(fila.dia),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.width(80.dp),
+                    )
+                    CampoHora(
+                        valor = fila.inicio,
+                        alCambiar = { nuevo -> actualizar(fila.dia) { it.copy(inicio = nuevo) } },
+                        pista = "09:00",
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("–", style = MaterialTheme.typography.bodySmall)
+                    CampoHora(
+                        valor = fila.fin,
+                        alCambiar = { nuevo -> actualizar(fila.dia) { it.copy(fin = nuevo) } },
+                        pista = "18:00",
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            TextButton(
+                onClick = {
+                    val lunes = filas.firstOrNull { it.dia == 1 }
+                    if (lunes != null) {
+                        filas = filas.map {
+                            if (it.dia in 1..5) {
+                                it.copy(activo = true, inicio = lunes.inicio, fin = lunes.fin)
+                            } else {
+                                it
+                            }
+                        }
+                    }
+                },
+            ) { Text("Copiar lunes a lunes–viernes") }
+
+            Button(
+                onClick = {
+                    val reglas = filas
+                        .filter { it.activo && it.inicio.isNotBlank() && it.fin.isNotBlank() }
+                        .map { ReglaDisponibilidad(it.dia, it.inicio.trim(), it.fin.trim()) }
+                    estado.guardarDisponibilidad(reglas)
+                },
+                enabled = !estado.trabajando,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Guardar horario semanal") }
+        }
+    }
+}
+
+/** Política de reservas de la sala: duración, buffer, antelación, cupos y modo de aprobación. */
+@Composable
+private fun PoliticaReservas(estado: EstadoApp) {
+    val sala = estado.sala
+    val firma = sala?.let {
+        "${it.duracionTurnoMin},${it.duracionMaximaMin},${it.bufferMin},${it.antelacionMinHoras}," +
+            "${it.diasMaxAntelacion},${it.capacidadPorTurno},${it.aprobacionAutomatica}," +
+            "${it.maxReservasPorDia}"
+    }
+
+    var turno by remember { mutableStateOf("60") }
+    var maxima by remember { mutableStateOf("120") }
+    var buffer by remember { mutableStateOf("0") }
+    var antelacion by remember { mutableStateOf("0") }
+    var horizonte by remember { mutableStateOf("60") }
+    var capacidad by remember { mutableStateOf("1") }
+    var porDia by remember { mutableStateOf("1") }
+    var automatica by remember { mutableStateOf(true) }
+
+    LaunchedEffect(firma) {
+        val actual = sala ?: return@LaunchedEffect
+        turno = actual.duracionTurnoMin.toString()
+        maxima = actual.duracionMaximaMin.toString()
+        buffer = actual.bufferMin.toString()
+        antelacion = actual.antelacionMinHoras.toString()
+        horizonte = actual.diasMaxAntelacion.toString()
+        capacidad = actual.capacidadPorTurno.toString()
+        porDia = actual.maxReservasPorDia.toString()
+        automatica = actual.aprobacionAutomatica
+    }
+
+    fun soloDigitos(texto: String): String = texto.filter { it.isDigit() }.take(3)
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Política de reservas", fontWeight = FontWeight.SemiBold)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CampoTexto(
+                    turno, { turno = soloDigitos(it) }, "Turno (min)",
+                    Modifier.weight(1f), ayuda = "Paso entre horas",
+                )
+                CampoTexto(
+                    maxima, { maxima = soloDigitos(it) }, "Máximo (min)",
+                    Modifier.weight(1f), ayuda = "Duración tope",
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CampoTexto(
+                    buffer, { buffer = soloDigitos(it) }, "Buffer (min)",
+                    Modifier.weight(1f), ayuda = "Pausa entre reservas",
+                )
+                CampoTexto(
+                    antelacion, { antelacion = soloDigitos(it) }, "Antelación (h)",
+                    Modifier.weight(1f), ayuda = "Mínimo para reservar",
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CampoTexto(
+                    horizonte, { horizonte = soloDigitos(it) }, "Días a la vista",
+                    Modifier.weight(1f), ayuda = "Hasta cuándo se reserva",
+                )
+                CampoTexto(
+                    capacidad, { capacidad = soloDigitos(it) }, "Cupos por franja",
+                    Modifier.weight(1f),
+                )
+            }
+            CampoTexto(
+                porDia, { porDia = soloDigitos(it) }, "Reservas por persona y día",
+                ayuda = "0 = sin límite",
+            )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Aprobación automática", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (automatica) "La reserva queda confirmada al instante"
+                        else "Cada solicitud queda pendiente de revisión",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(checked = automatica, onCheckedChange = { automatica = it })
+            }
+
+            Button(
+                onClick = {
+                    estado.guardarPolitica(
+                        duracionTurnoMin = turno.toIntOrNull() ?: 60,
+                        duracionMaximaMin = maxima.toIntOrNull() ?: 120,
+                        bufferMin = buffer.toIntOrNull() ?: 0,
+                        antelacionMinHoras = antelacion.toIntOrNull() ?: 0,
+                        diasMaxAntelacion = horizonte.toIntOrNull() ?: 60,
+                        capacidadPorTurno = capacidad.toIntOrNull() ?: 1,
+                        aprobacionAutomatica = automatica,
+                        maxReservasPorDia = porDia.toIntOrNull() ?: 1,
+                    )
+                },
+                enabled = !estado.trabajando,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Guardar política") }
+        }
+    }
+}
+
+/** Una reserva próxima con los datos de contacto de la persona. */
+@Composable
+private fun TarjetaAgenda(estado: EstadoApp, fila: FilaAgenda) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    Formato.fechaLarga(fila.fecha) + " · " +
+                        Formato.rangoHora(fila.horaInicio, fila.horaFin),
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                EtiquetaEstado(fila.estado)
+            }
+            Text(
+                fila.nombre.ifBlank { "Sin nombre" } +
+                    (fila.telefono?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            fila.comentario?.takeIf { it.isNotBlank() }?.let {
+                Text("Comentario: $it", style = MaterialTheme.typography.bodySmall)
+            }
+            if (fila.estado == "aprobada" || fila.estado == "pendiente") {
+                TextButton(onClick = { estado.cancelarReserva(fila.reservaId) }) {
+                    Text("Cancelar reserva")
+                }
+            }
+        }
+    }
+}
+
