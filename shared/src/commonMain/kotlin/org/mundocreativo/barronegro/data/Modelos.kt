@@ -120,22 +120,28 @@ data class ReglaDisponibilidad(
     @SerialName("hora_fin") val horaFin: String,
 )
 
-/** Fila de `agenda_admin(...)`: reserva próxima con los datos de la persona. */
+/**
+ * Fila de `reporte_reservas(...)`: una reserva del mes con los datos de contacto
+ * que necesita el reporte del administrador (nombre, correo, teléfono, duración).
+ */
 @Serializable
-data class FilaAgenda(
+data class FilaReporte(
     @SerialName("reserva_id") val reservaId: String,
     val fecha: String,
     @SerialName("hora_inicio") val horaInicio: String,
     @SerialName("hora_fin") val horaFin: String,
+    @SerialName("duracion_min") val duracionMin: Int = 0,
     val estado: String,
-    @SerialName("usuario_id") val usuarioId: String? = null,
-    val nombre: String = "",
-    val telefono: String? = null,
-    val correo: String? = null,
-    val comentario: String? = null,
     val origen: String = "cuenta",
+    val nombre: String = "",
+    val correo: String? = null,
+    val telefono: String? = null,
+    val comentario: String? = null,
 ) {
     val esAnonima: Boolean get() = origen == "anonima"
+
+    /** Cita que ocupa cupo: pendiente, confirmada o con una nueva fecha propuesta. */
+    val activa: Boolean get() = estado == "pendiente" || estado == "aprobada" || estado == "reprogramada"
 }
 
 /** Respuesta de `reservar_franja_anonima(...)`. */

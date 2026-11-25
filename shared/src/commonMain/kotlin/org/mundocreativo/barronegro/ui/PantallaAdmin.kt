@@ -29,7 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.mundocreativo.barronegro.EstadoApp
 import org.mundocreativo.barronegro.Formato
-import org.mundocreativo.barronegro.data.FilaAgenda
+import org.mundocreativo.barronegro.data.FilaReporte
 import org.mundocreativo.barronegro.data.ReglaDisponibilidad
 import org.mundocreativo.barronegro.data.Reserva
 import org.mundocreativo.barronegro.data.SupabaseConfig
@@ -47,7 +47,7 @@ fun PantallaAdmin(estado: EstadoApp) {
 
     var rechazando by remember { mutableStateOf<Reserva?>(null) }
     var proponiendo by remember { mutableStateOf<Reserva?>(null) }
-    var cancelando by remember { mutableStateOf<FilaAgenda?>(null) }
+    var cancelando by remember { mutableStateOf<FilaReporte?>(null) }
 
     Column(
         modifier = Modifier
@@ -211,14 +211,8 @@ fun PantallaAdmin(estado: EstadoApp) {
             }
         }
 
-        Text("Agenda de los próximos 60 días", style = MaterialTheme.typography.titleSmall)
-        val agendaActiva = estado.agenda.filter {
-            it.estado == "pendiente" || it.estado == "aprobada" || it.estado == "reprogramada"
-        }
-        if (agendaActiva.isEmpty()) {
-            Text("Todavía no hay reservas próximas.", style = MaterialTheme.typography.bodySmall)
-        }
-        agendaActiva.forEach { fila -> TarjetaAgenda(estado, fila) { cancelando = fila } }
+        Text("Calendario y reportes del mes", style = MaterialTheme.typography.titleSmall)
+        SeccionReportes(estado) { fila -> cancelando = fila }
     }
 
     rechazando?.let { reserva ->
@@ -249,7 +243,7 @@ fun PantallaAdmin(estado: EstadoApp) {
 
 @Composable
 private fun DialogoCancelarAgenda(
-    fila: FilaAgenda,
+    fila: FilaReporte,
     alCerrar: () -> Unit,
     alConfirmar: (String?) -> Unit,
 ) {
@@ -571,51 +565,6 @@ private fun PoliticaReservas(estado: EstadoApp) {
                 enabled = !estado.trabajando,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Guardar política") }
-        }
-    }
-}
-
-/** Una reserva próxima con los datos de contacto de la persona. */
-@Composable
-private fun TarjetaAgenda(estado: EstadoApp, fila: FilaAgenda, alCancelar: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    Formato.fechaLarga(fila.fecha) + " · " +
-                            Formato.rangoHora(fila.horaInicio, fila.horaFin),
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                EtiquetaEstado(fila.estado)
-            }
-            Text(
-                listOfNotNull(
-                    fila.nombre.ifBlank { "Sin nombre" },
-                    fila.telefono?.takeIf { it.isNotBlank() },
-                    fila.correo?.takeIf { it.isNotBlank() },
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (fila.esAnonima) {
-                Text("Reserva anónima · identificada por el navegador", style = MaterialTheme.typography.labelSmall)
-            }
-            fila.comentario?.takeIf { it.isNotBlank() }?.let {
-                Text("Comentario: $it", style = MaterialTheme.typography.bodySmall)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (fila.estado == "aprobada" || fila.estado == "pendiente" || fila.estado == "reprogramada") {
-                    TextButton(onClick = alCancelar) { Text("Cancelar reserva") }
-                }
-                if (!fila.correo.isNullOrBlank()) {
-                    TextButton(onClick = { estado.reenviarCorreoReserva(fila.reservaId) }) {
-                        Text("Reenviar correo")
-                    }
-                }
-            }
         }
     }
 }

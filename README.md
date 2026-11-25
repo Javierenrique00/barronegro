@@ -54,6 +54,7 @@ Migraciones aplicadas (también versionadas en `supabase/migrations/`):
 14. `reservas_existentes_ajustes`
 15. `correos_reserva`
 16. `correos_reserva_envio`
+17. `reportes_admin`
 
 ## Reservas tipo Calendly
 
@@ -73,6 +74,8 @@ instante** (salvo que el administrador desactive la aprobación automática).
 - `actualizar_politica_sala(...)` cambia duración, buffer, antelación, horizonte, cupos, aprobación
   automática y reservas por día desde el panel del administrador.
 - `agenda_admin(dias)` devuelve las reservas próximas con nombre y teléfono, para el panel.
+- `reporte_reservas(desde, hasta, sala)` devuelve las reservas del rango con nombre, correo,
+  teléfono, fecha y duración; alimenta el calendario mensual y el CSV del administrador.
 - Las franjas de `horarios` creadas a mano siguen apareciendo en el calendario y son reservables;
   se deduplican con las de la plantilla.
 
@@ -110,6 +113,27 @@ Los datos de contacto solo se devuelven al administrador (`agenda_admin`) y a la
 > El linter de Supabase marca las funciones `SECURITY DEFINER` ejecutables por `anon` como aviso.
 > Aquí es intencional: son las únicas puertas del flujo anónimo y cada una valida la sesión, el
 > token humano y/o las reglas de la sala. Las tablas siguen cerradas para `anon`.
+
+## Reportes del administrador
+
+El panel muestra las citas de un mes en formato calendario y permite descargarlas en CSV.
+Los datos salen de `reporte_reservas(desde, hasta, sala)`, una función `SECURITY DEFINER`
+que exige un administrador activo, igual que el resto de RPC del panel.
+
+- La rejilla marca cada día con el número de citas programadas; al tocar un día se listan
+  sus citas con hora, duración, estado, nombre, correo y teléfono. Desde ahí se puede
+  cancelar la reserva o reenviar el correo de confirmación.
+- Por defecto solo aparecen las citas `pendiente`, `aprobada` y `reprogramada`. El
+  interruptor **Incluir canceladas y rechazadas** añade el histórico al calendario y al CSV.
+- **CSV**: `reservas-AAAA-MM.csv`, con BOM UTF-8, saltos CRLF y separador `;` (el que espera
+  Excel en español). Columnas:
+  `Nombre;Correo;Teléfono;Fecha;Hora inicio;Hora fin;Duración (min);Estado;Origen;Comentario`.
+  En web se descarga directamente; en Android se abre la hoja de compartir/guardar del
+  sistema (`FileProvider`, sin permisos de almacenamiento).
+- El correo de una reserva hecha con cuenta se lee de `auth.users` (no está en `perfiles`);
+  el de una anónima viene de `correo_contacto`. La duración la calcula Postgres a partir de
+  `hora_inicio` y `hora_fin`.
+- El CSV se genera en el dispositivo y no se guarda en el servidor.
 
 ## Correos de reserva
 

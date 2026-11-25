@@ -15,6 +15,9 @@ dependencies {
 
     implementation(libs.androidx.activity.compose)
 
+    // FileProvider: la hoja de compartir del CSV del reporte.
+    implementation(libs.androidx.core.ktx)
+
     implementation(libs.compose.uiToolingPreview)
     debugImplementation(libs.compose.uiTooling)
 }

@@ -435,10 +435,17 @@ object Repositorio {
         )
     }
 
-    /** Reservas próximas con el nombre y el teléfono de cada persona (solo administradores). */
-    suspend fun agendaAdmin(dias: Int = 60): List<FilaAgenda> =
+    /**
+     * Reservas de un rango de fechas con nombre, correo, teléfono y duración
+     * (solo administradores). Alimenta el calendario y el CSV del panel.
+     */
+    suspend fun reporteReservas(desde: String, hasta: String): List<FilaReporte> =
         supabase.postgrest.rpc(
-            "agenda_admin",
-            buildJsonObject { put("p_dias", dias) },
+            "reporte_reservas",
+            buildJsonObject {
+                put("p_sala_id", SALA)
+                put("p_desde", desde)
+                put("p_hasta", hasta)
+            },
         ).decodeList()
 }

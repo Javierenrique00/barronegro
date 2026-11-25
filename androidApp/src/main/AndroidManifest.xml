@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
+            android:name=".AplicacionBarronegro"
             android:allowBackup="false"
             android:dataExtractionRules="@xml/reglas_extraccion_datos"
             android:fullBackupContent="@xml/backup_rules"
@@ -30,6 +31,17 @@
                 <data android:scheme="org.mundocreativo.barronegro" android:host="auth-callback" />
             </intent-filter>
         </activity>
+
+        <!-- Expone solo la carpeta cache/reportes para guardar o compartir el CSV. -->
+        <provider
+                android:name="androidx.core.content.FileProvider"
+                android:authorities="${applicationId}.archivos"
+                android:exported="false"
+                android:grantUriPermissions="true">
+            <meta-data
+                    android:name="android.support.FILE_PROVIDER_PATHS"
+                    android:resource="@xml/rutas_archivos" />
+        </provider>
     </application>
 
 </manifest>

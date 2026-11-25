@@ -10,17 +10,19 @@ import kotlinx.coroutines.launch
 import org.mundocreativo.barronegro.data.Bloqueo
 import org.mundocreativo.barronegro.data.ConfirmacionReserva
 import org.mundocreativo.barronegro.data.Contacto
-import org.mundocreativo.barronegro.data.FilaAgenda
+import org.mundocreativo.barronegro.data.FilaReporte
 import org.mundocreativo.barronegro.data.FranjaDisponible
 import org.mundocreativo.barronegro.data.Horario
 import org.mundocreativo.barronegro.data.Perfil
 import org.mundocreativo.barronegro.data.PreferenciasApp
 import org.mundocreativo.barronegro.data.ReglaDisponibilidad
+import org.mundocreativo.barronegro.data.ReporteCsv
 import org.mundocreativo.barronegro.data.Repositorio
 import org.mundocreativo.barronegro.data.Reserva
 import org.mundocreativo.barronegro.data.ReservaAnonima
 import org.mundocreativo.barronegro.data.Sala
 import org.mundocreativo.barronegro.data.borrarSesionAnonima
+import org.mundocreativo.barronegro.data.guardarCsv
 import org.mundocreativo.barronegro.data.guardarSesionAnonima
 import org.mundocreativo.barronegro.data.leerSesionAnonima
 
@@ -58,8 +60,12 @@ class EstadoApp(private val alcance: CoroutineScope) {
     var reglas by mutableStateOf<List<ReglaDisponibilidad>>(emptyList())
         private set
 
-    /** Reservas próximas con el nombre de cada persona (solo administradores). */
-    var agenda by mutableStateOf<List<FilaAgenda>>(emptyList())
+    /** Reservas del mes que se muestra en el calendario del administrador. */
+    var reporte by mutableStateOf<List<FilaReporte>>(emptyList())
+        private set
+
+    /** Mes del reporte del administrador (independiente del calendario público). */
+    var mesReporte by mutableStateOf(MesCalendario.actual())
         private set
 
     /** Reservas hechas desde este navegador sin cuenta. */
@@ -232,11 +238,14 @@ class EstadoApp(private val alcance: CoroutineScope) {
         if (perfil?.esAdmin == true) {
             pendientes = Repositorio.reservasPorResolver()
             reglas = Repositorio.reglasDisponibilidad()
-            agenda = Repositorio.agendaAdmin()
+            reporte = Repositorio.reporteReservas(
+                mesReporte.primerDiaIso(),
+                mesReporte.ultimoDiaIso(),
+            )
         } else {
             pendientes = emptyList()
             reglas = emptyList()
-            agenda = emptyList()
+            reporte = emptyList()
         }
     }
 
@@ -250,7 +259,8 @@ class EstadoApp(private val alcance: CoroutineScope) {
         pendientes = emptyList()
         bloqueos = emptyList()
         reglas = emptyList()
-        agenda = emptyList()
+        reporte = emptyList()
+        mesReporte = MesCalendario.actual()
     }
 
     /**
@@ -312,8 +322,9 @@ class EstadoApp(private val alcance: CoroutineScope) {
         sala = null
         franjas = emptyList()
         reglas = emptyList()
-        agenda = emptyList()
+        reporte = emptyList()
         mesCalendario = MesCalendario.actual()
+        mesReporte = MesCalendario.actual()
     }
 
     fun recuperarContrasena(correo: String) =
@@ -432,6 +443,45 @@ class EstadoApp(private val alcance: CoroutineScope) {
             } finally {
                 trabajando = false
             }
+        }
+    }
+
+    /**
+     * Mueve el reporte del administrador de mes. A diferencia del calendario público
+     * sí se puede retroceder: los meses pasados sirven para contabilidad.
+     */
+    fun cambiarMesReporte(meses: Int) {
+        if (!esAdmin) return
+        val destino = mesReporte.sumar(meses)
+        mesReporte = destino
+        alcance.launch {
+            trabajando = true
+            try {
+                reporte = Repositorio.reporteReservas(destino.primerDiaIso(), destino.ultimoDiaIso())
+                error = null
+            } catch (t: Throwable) {
+                error = mensajeDeError(t)
+            } finally {
+                trabajando = false
+            }
+        }
+    }
+
+    /**
+     * Genera el CSV con las filas indicadas y lo entrega a la plataforma: descarga
+     * en web y hoja de compartir/guardar en Android. Se hace al pulsar el botón
+     * (sin suspender), para que el navegador no bloquee la descarga.
+     */
+    fun exportarReporteCsv(mes: MesCalendario, filas: List<FilaReporte>) {
+        val guardado = guardarCsv(
+            nombreArchivo = ReporteCsv.nombreArchivo(mes),
+            contenido = ReporteCsv.generar(filas),
+        )
+        if (guardado) {
+            error = null
+            aviso = "Reporte CSV generado: ${ReporteCsv.nombreArchivo(mes)}"
+        } else {
+            error = "No se pudo generar el archivo CSV en este dispositivo"
         }
     }
 
